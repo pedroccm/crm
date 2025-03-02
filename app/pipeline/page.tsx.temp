@@ -1,0 +1,51 @@
+import { Plus, Settings, Trash2, GripVertical, Pencil, X, Mail, Phone, Building2, Calendar, Tag, ExternalLink, Clock, History, PlusCircle } from "lucide-react"
+
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+
+export default function PipelinePage() {
+  const [isAddingStage, setIsAddingStage] = useState(false)
+  const [newStageName, setNewStageName] = useState("")
+
+  function handleAddStage() {
+    setNewStageName("")
+    setIsAddingStage(true)
+  }
+
+  async function saveNewStage() {
+    if (!newStageName.trim() || !selectedPipeline) return
+    
+    try {
+      const nextOrder = stages.length > 0 
+        ? Math.max(...stages.map(s => s.stage_order)) + 1 
+        : 1
+      
+      const { data, error } = await supabase
+        .from('pipeline_stages')
+        .insert({
+          pipeline_id: selectedPipeline,
+          stage_name: newStageName.trim(),
+          stage_order: nextOrder
+        })
+        .select()
+
+      if (error) throw error
+      
+      if (data) {
+        setStages([...stages, data[0]])
+        toast.success("Etapa adicionada com sucesso!")
+      }
+    } catch (error) {
+      console.error('Erro ao adicionar etapa:', error)
+      toast.error("Erro ao adicionar etapa")
+    } finally {
+      setIsAddingStage(false)
+    }
+  }
+} 
