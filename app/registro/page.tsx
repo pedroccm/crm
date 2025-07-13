@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 
-export default function RegistroPage() {
+function RegistroForm() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -28,9 +28,9 @@ export default function RegistroPage() {
   useEffect(() => {
     if (user) {
       console.log("Usuário já autenticado, redirecionando para:", redirect);
-      window.location.href = redirect;
+      router.push(redirect);
     }
-  }, [user, redirect]);
+  }, [user, redirect, router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -181,5 +181,20 @@ export default function RegistroPage() {
         </form>
       </Card>
     </div>
+  );
+}
+
+export default function RegistroPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="text-center">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
+          <p>Carregando...</p>
+        </div>
+      </div>
+    }>
+      <RegistroForm />
+    </Suspense>
   );
 } 

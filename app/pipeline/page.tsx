@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
@@ -845,7 +845,7 @@ const StageColumn = ({
   )
 }
 
-export default function PipelinePage() {
+function PipelineContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const pipelineIdFromUrl = searchParams ? searchParams.get('id') : null
@@ -1321,5 +1321,20 @@ export default function PipelinePage() {
         />
       </SidebarInset>
     </SidebarProvider>
+  )
+}
+
+export default function PipelinePage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-300 border-t-blue-600 mx-auto mb-4"></div>
+          <p>Carregando pipeline...</p>
+        </div>
+      </div>
+    }>
+      <PipelineContent />
+    </Suspense>
   )
 } 
