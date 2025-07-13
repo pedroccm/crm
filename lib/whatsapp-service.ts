@@ -201,7 +201,7 @@ export async function fetchLeadsForChat(searchTerm: string = ''): Promise<Lead[]
       name: lead.name,
       phone: lead.phone,
       email: lead.email,
-      company_name: lead.companies ? lead.companies.name : undefined,
+      company_name: lead.companies && lead.companies.length > 0 ? lead.companies[0].name : undefined,
       status: lead.status
     }));
   } catch (error) {
