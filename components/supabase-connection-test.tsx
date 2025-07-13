@@ -25,7 +25,7 @@ export function SupabaseConnectionTest() {
       setDebugInfo(`URL disponível: ${!!url}\nChave disponível: ${!!key}`);
       
       const connected = await checkSupabaseConnection();
-      setIsConnected(connected);
+      setIsConnected(connected.success);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido ao conectar ao Supabase';
       setError(errorMessage);
