@@ -1,6 +1,10 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import { ThemeProvider } from '@/components/theme-provider'
+import { AuthProvider } from '@/lib/auth-context'
+import { TeamProvider } from '@/lib/team-context'
+import { Toaster } from 'sonner'
+import { SidebarProvider } from '@/components/ui/sidebar'
 
 export const metadata: Metadata = {
   title: 'Meu CRM',
@@ -22,7 +26,14 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          <AuthProvider>
+            <TeamProvider>
+              <SidebarProvider>
+                {children}
+                <Toaster position="top-right" richColors />
+              </SidebarProvider>
+            </TeamProvider>
+          </AuthProvider>
         </ThemeProvider>
       </body>
     </html>

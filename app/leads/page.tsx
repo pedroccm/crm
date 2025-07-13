@@ -36,6 +36,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { useTeam } from "@/lib/team-context"
 
 interface Lead {
   id: string
@@ -58,14 +59,24 @@ export default function LeadsPage() {
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
+  const { currentTeam } = useTeam()
 
   useEffect(() => {
     loadLeads()
-  }, [])
+  }, [currentTeam])
 
   async function loadLeads() {
     try {
       setLoading(true)
+      
+      // Verificar se há um time selecionado
+      if (!currentTeam?.id) {
+        setLeads([])
+        toast.warning("Selecione um time para visualizar os leads")
+        return
+      }
+      
+      // Filtrar leads pelo time atual
       const { data, error } = await supabase
         .from('leads')
         .select(`
@@ -74,17 +85,19 @@ export default function LeadsPage() {
             name
           )
         `)
-        .order('created_at', { ascending: false })
-
+        .eq('team_id', currentTeam.id)
+        .not('team_id', 'is', null) // Garantir que team_id não seja nulo
+        .order('name')
+      
       if (error) throw error
       
-      // Transformar os dados para incluir o nome da empresa
-      const formattedLeads = data?.map(lead => ({
+      // Processar os dados para adicionar company_name
+      const processedLeads = data?.map(lead => ({
         ...lead,
         company_name: lead.companies?.name
       })) || []
       
-      setLeads(formattedLeads)
+      setLeads(processedLeads)
     } catch (error) {
       console.error('Erro ao carregar leads:', error)
       toast.error("Erro ao carregar leads")

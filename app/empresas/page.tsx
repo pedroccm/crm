@@ -30,6 +30,7 @@ import { Plus, Search, Trash2, Pencil } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
+import { useTeam } from "@/lib/team-context"
 
 interface Company {
   id: string
@@ -46,20 +47,33 @@ export default function EmpresasPage() {
   const [companies, setCompanies] = useState<Company[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState("")
+  const { currentTeam } = useTeam()
 
   useEffect(() => {
     loadCompanies()
-  }, [])
+  }, [currentTeam])
 
   async function loadCompanies() {
     try {
       setLoading(true)
+      
+      if (!currentTeam?.id) {
+        setCompanies([])
+        toast.warning("Selecione um time para visualizar as empresas")
+        return
+      }
+      
+      const teamId = currentTeam.id
+      
       const { data, error } = await supabase
         .from('companies')
         .select('*')
+        .eq('team_id', teamId)
+        .not('team_id', 'is', null)
         .order('name')
-
+      
       if (error) throw error
+      
       setCompanies(data || [])
     } catch (error) {
       console.error('Erro ao carregar empresas:', error)

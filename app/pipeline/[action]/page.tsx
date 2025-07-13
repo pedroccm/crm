@@ -26,6 +26,7 @@ import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import { toast } from "sonner"
+import { useTeam } from "@/lib/team-context"
 
 interface PageProps {
   params: {
@@ -45,6 +46,7 @@ export default function PipelineFormPage({ params }: PageProps) {
   const isEditing = params.action !== "novo"
   const [loading, setLoading] = useState(false)
   const [loadingData, setLoadingData] = useState(isEditing)
+  const { currentTeam } = useTeam()
 
   const {
     register,
@@ -97,10 +99,15 @@ export default function PipelineFormPage({ params }: PageProps) {
     try {
       setLoading(true)
 
+      const pipelineData = {
+        ...data,
+        team_id: currentTeam?.id
+      }
+
       if (isEditing) {
         const { error } = await supabase
           .from('pipelines')
-          .update(data)
+          .update(pipelineData)
           .eq('id', params.action)
 
         if (error) throw error
@@ -108,7 +115,7 @@ export default function PipelineFormPage({ params }: PageProps) {
       } else {
         const { error } = await supabase
           .from('pipelines')
-          .insert([data])
+          .insert([pipelineData])
 
         if (error) throw error
         toast.success("Pipeline criado com sucesso!")

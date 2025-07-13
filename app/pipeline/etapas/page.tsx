@@ -50,6 +50,7 @@ import { toast } from "sonner"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
+import { useTeam } from "@/lib/team-context"
 
 interface Pipeline {
   id: string
@@ -81,6 +82,7 @@ export default function PipelineStagesPage() {
   const [loading, setLoading] = useState(true)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingStage, setEditingStage] = useState<PipelineStage | null>(null)
+  const { currentTeam } = useTeam()
 
   const {
     register,
@@ -94,7 +96,7 @@ export default function PipelineStagesPage() {
 
   useEffect(() => {
     loadPipelines()
-  }, [])
+  }, [currentTeam])
 
   useEffect(() => {
     if (selectedPipeline) {
@@ -105,18 +107,30 @@ export default function PipelineStagesPage() {
   async function loadPipelines() {
     try {
       setLoading(true)
+      
+      // Verificar se há um time selecionado
+      if (!currentTeam?.id) {
+        setPipelines([])
+        toast.warning("Selecione um time para visualizar os pipelines")
+        return
+      }
+      
+      // Filtrar pipelines pelo time atual
       const { data, error } = await supabase
         .from('pipelines')
         .select('*')
+        .eq('team_id', currentTeam.id)
+        .not('team_id', 'is', null) // Garantir que team_id não seja nulo
         .order('name')
-
+      
       if (error) throw error
       
       setPipelines(data || [])
       
-      // Selecionar o primeiro pipeline por padrão se existir
+      // Se tiver pipelines, seleciona o primeiro por padrão
       if (data && data.length > 0 && !selectedPipeline) {
         setSelectedPipeline(data[0].id)
+        await loadStages(data[0].id)
       }
     } catch (error) {
       console.error('Erro ao carregar pipelines:', error)

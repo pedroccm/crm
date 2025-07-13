@@ -21,10 +21,33 @@ import {
 import { supabase } from "@/lib/supabase"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
-import { useForm } from "react-hook-form"
+import { useForm, Controller } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import { toast } from "sonner"
+import { useTeam } from "@/lib/team-context"
+import { 
+  CustomFieldDefinition, 
+  CustomFieldType, 
+  listCustomFields 
+} from "@/lib/supabase"
+import { 
+  Checkbox 
+} from "@/components/ui/checkbox"
+import { 
+  Card, 
+  CardContent, 
+  CardHeader, 
+  CardTitle 
+} from "@/components/ui/card"
+import { Textarea } from "@/components/ui/textarea"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 const companySchema = z.object({
   name: z.string().min(1, "Nome é obrigatório"),
@@ -32,6 +55,7 @@ const companySchema = z.object({
   phone: z.string().min(1, "Telefone é obrigatório"),
   address: z.string().optional(),
   website: z.string().url("Website inválido").optional().or(z.literal("")),
+  custom_fields: z.any().optional(),
 })
 
 type CompanyFormData = z.infer<typeof companySchema>
@@ -47,21 +71,32 @@ export default function CompanyFormPage({ params }: PageProps) {
   const isEditing = params.action !== "nova"
   const [loading, setLoading] = useState(false)
   const [loadingData, setLoadingData] = useState(isEditing)
+  const { currentTeam } = useTeam()
+  const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([])
+  const [loadingCustomFields, setLoadingCustomFields] = useState(false)
 
   const {
     register,
     handleSubmit,
     formState: { errors },
     reset,
+    setValue,
+    control,
   } = useForm<CompanyFormData>({
     resolver: zodResolver(companySchema),
+    defaultValues: {
+      custom_fields: {}
+    }
   })
 
   useEffect(() => {
     if (isEditing) {
       loadCompany()
     }
-  }, [isEditing])
+    if (currentTeam?.id) {
+      loadCustomFields()
+    }
+  }, [isEditing, currentTeam])
 
   async function loadCompany() {
     try {
@@ -95,14 +130,206 @@ export default function CompanyFormPage({ params }: PageProps) {
     }
   }
 
+  async function loadCustomFields() {
+    try {
+      setLoadingCustomFields(true)
+      
+      if (!currentTeam?.id) {
+        return
+      }
+      
+      const fields = await listCustomFields(currentTeam.id, 'company')
+      setCustomFields(fields)
+    } catch (error) {
+      console.error('Erro ao carregar campos personalizados:', error)
+    } finally {
+      setLoadingCustomFields(false)
+    }
+  }
+
+  // Função para renderizar um campo personalizado com base no tipo
+  function renderCustomField(field: CustomFieldDefinition) {
+    const fieldValue = control._formValues.custom_fields?.[field.field_name] || ''
+    
+    switch (field.field_type) {
+      case CustomFieldType.TEXT:
+      case CustomFieldType.EMAIL:
+      case CustomFieldType.PHONE:
+      case CustomFieldType.URL:
+        return (
+          <div className="space-y-2" key={field.id}>
+            <Label htmlFor={`custom_${field.field_name}`}>
+              {field.display_name}
+              {field.is_required && <span className="text-red-500 ml-1">*</span>}
+            </Label>
+            <Controller
+              name={`custom_fields.${field.field_name}`}
+              control={control}
+              defaultValue={fieldValue}
+              render={({ field: controllerField }) => (
+                <Input
+                  id={`custom_${field.field_name}`}
+                  placeholder={`Digite ${field.display_name.toLowerCase()}`}
+                  type={field.field_type === CustomFieldType.EMAIL ? 'email' : 
+                        field.field_type === CustomFieldType.URL ? 'url' : 'text'}
+                  {...controllerField}
+                  required={field.is_required}
+                />
+              )}
+            />
+          </div>
+        )
+        
+      case CustomFieldType.NUMBER:
+        return (
+          <div className="space-y-2" key={field.id}>
+            <Label htmlFor={`custom_${field.field_name}`}>
+              {field.display_name}
+              {field.is_required && <span className="text-red-500 ml-1">*</span>}
+            </Label>
+            <Controller
+              name={`custom_fields.${field.field_name}`}
+              control={control}
+              defaultValue={fieldValue}
+              render={({ field: controllerField }) => (
+                <Input
+                  id={`custom_${field.field_name}`}
+                  placeholder={`Digite ${field.display_name.toLowerCase()}`}
+                  type="number"
+                  {...controllerField}
+                  required={field.is_required}
+                />
+              )}
+            />
+          </div>
+        )
+        
+      case CustomFieldType.DATE:
+        return (
+          <div className="space-y-2" key={field.id}>
+            <Label htmlFor={`custom_${field.field_name}`}>
+              {field.display_name}
+              {field.is_required && <span className="text-red-500 ml-1">*</span>}
+            </Label>
+            <Controller
+              name={`custom_fields.${field.field_name}`}
+              control={control}
+              defaultValue={fieldValue}
+              render={({ field: controllerField }) => (
+                <Input
+                  id={`custom_${field.field_name}`}
+                  type="date"
+                  {...controllerField}
+                  required={field.is_required}
+                />
+              )}
+            />
+          </div>
+        )
+        
+      case CustomFieldType.TEXTAREA:
+        return (
+          <div className="space-y-2" key={field.id}>
+            <Label htmlFor={`custom_${field.field_name}`}>
+              {field.display_name}
+              {field.is_required && <span className="text-red-500 ml-1">*</span>}
+            </Label>
+            <Controller
+              name={`custom_fields.${field.field_name}`}
+              control={control}
+              defaultValue={fieldValue}
+              render={({ field: controllerField }) => (
+                <Textarea
+                  id={`custom_${field.field_name}`}
+                  placeholder={`Digite ${field.display_name.toLowerCase()}`}
+                  {...controllerField}
+                  required={field.is_required}
+                />
+              )}
+            />
+          </div>
+        )
+        
+      case CustomFieldType.SELECT:
+        return (
+          <div className="space-y-2" key={field.id}>
+            <Label htmlFor={`custom_${field.field_name}`}>
+              {field.display_name}
+              {field.is_required && <span className="text-red-500 ml-1">*</span>}
+            </Label>
+            <Controller
+              name={`custom_fields.${field.field_name}`}
+              control={control}
+              defaultValue={fieldValue}
+              render={({ field: controllerField }) => (
+                <Select
+                  onValueChange={controllerField.onChange}
+                  value={controllerField.value}
+                >
+                  <SelectTrigger id={`custom_${field.field_name}`}>
+                    <SelectValue placeholder={`Selecione ${field.display_name.toLowerCase()}`} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {field.field_options?.options?.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
+        )
+        
+      case CustomFieldType.CHECKBOX:
+        return (
+          <div className="flex items-center space-x-2" key={field.id}>
+            <Controller
+              name={`custom_fields.${field.field_name}`}
+              control={control}
+              defaultValue={fieldValue === 'true'}
+              render={({ field: controllerField }) => (
+                <Checkbox
+                  id={`custom_${field.field_name}`}
+                  checked={controllerField.value === 'true'}
+                  onCheckedChange={(checked) => {
+                    controllerField.onChange(checked ? 'true' : 'false');
+                  }}
+                />
+              )}
+            />
+            <Label htmlFor={`custom_${field.field_name}`}>
+              {field.display_name}
+              {field.is_required && <span className="text-red-500 ml-1">*</span>}
+            </Label>
+          </div>
+        )
+        
+      default:
+        return null
+    }
+  }
+
   async function onSubmit(data: CompanyFormData) {
     try {
       setLoading(true)
+      
+      if (!currentTeam?.id) {
+        toast.error("Selecione um time para salvar a empresa")
+        setLoading(false)
+        return
+      }
+
+      const companyData = {
+        ...data,
+        team_id: currentTeam.id
+      }
 
       if (isEditing) {
         const { error } = await supabase
           .from('companies')
-          .update(data)
+          .update(companyData)
           .eq('id', params.action)
 
         if (error) throw error
@@ -110,7 +337,7 @@ export default function CompanyFormPage({ params }: PageProps) {
       } else {
         const { error } = await supabase
           .from('companies')
-          .insert([data])
+          .insert([companyData])
 
         if (error) throw error
         toast.success("Empresa cadastrada com sucesso!")
@@ -263,16 +490,34 @@ export default function CompanyFormPage({ params }: PageProps) {
               </div>
             </div>
 
-            <div className="flex gap-4">
-              <Button type="submit" disabled={loading}>
-                {loading ? "Salvando..." : "Salvar"}
-              </Button>
+            {/* Campos personalizados */}
+            {customFields.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Informações Adicionais</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {customFields
+                      .filter(field => field.is_visible)
+                      .sort((a, b) => a.sort_order - b.sort_order)
+                      .map(field => renderCustomField(field))
+                  }
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            <div className="flex justify-end gap-2">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => router.push('/empresas')}
               >
                 Cancelar
+              </Button>
+              <Button type="submit" disabled={loading || loadingData}>
+                {loading ? "Salvando..." : "Salvar"}
               </Button>
             </div>
           </form>

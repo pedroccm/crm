@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { AppSidebar } from "@/components/app-sidebar"
 import {
   Breadcrumb,
@@ -56,6 +56,7 @@ import {
   Label,
 } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
+import { useTeam } from "@/lib/team-context"
 
 interface Pipeline {
   id: string
@@ -721,9 +722,11 @@ const LeadDetailsSheet = ({
                       </div>
                       <div className="flex-1">
                         <p className="text-sm font-medium">{log.description}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDate(log.created_at)}
-                        </p>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>{formatDate(log.created_at)}</span>
+                          <span>•</span>
+                          <span>Por: {log.user_name || 'Sistema'}</span>
+                        </div>
                         
                         {/* Detalhes adicionais, se houver */}
                         {log.details && Object.keys(log.details).length > 0 && (
@@ -739,13 +742,6 @@ const LeadDetailsSheet = ({
                               <>
                                 <p><span className="font-medium">De:</span> {log.details.from_stage}</p>
                                 <p><span className="font-medium">Para:</span> {log.details.to_stage}</p>
-                              </>
-                            )}
-                            
-                            {log.action_type === LeadLogActionType.STATUS_CHANGED && (
-                              <>
-                                <p><span className="font-medium">De:</span> {log.details.old_status}</p>
-                                <p><span className="font-medium">Para:</span> {log.details.new_status}</p>
                               </>
                             )}
                           </div>
@@ -851,53 +847,100 @@ const StageColumn = ({
 
 export default function PipelinePage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const pipelineIdFromUrl = searchParams ? searchParams.get('id') : null
   const [pipelines, setPipelines] = useState<Pipeline[]>([])
-  const [selectedPipeline, setSelectedPipeline] = useState<string | null>(null)
+  const [selectedPipeline, setSelectedPipeline] = useState<string | null>(pipelineIdFromUrl)
   const [stages, setStages] = useState<PipelineStage[]>([])
   const [leadPipelines, setLeadPipelines] = useState<LeadPipeline[]>([])
-  const [loading, setLoading] = useState(true)
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [isLeadDetailsOpen, setIsLeadDetailsOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [loadingPipelines, setLoadingPipelines] = useState(true)
+  const [loadingLeads, setLoadingLeads] = useState(false)
+  const [loadingStages, setLoadingStages] = useState(false)
   const [isAddingStage, setIsAddingStage] = useState(false)
   const [newStageName, setNewStageName] = useState("")
+  const { currentTeam } = useTeam()
 
+  // Efeito para carregar pipelines quando o time mudar
   useEffect(() => {
     loadPipelines()
-  }, [])
+  }, [currentTeam])
 
+  // Efeito para definir o pipeline selecionado a partir da URL
+  useEffect(() => {
+    if (pipelineIdFromUrl) {
+      setSelectedPipeline(pipelineIdFromUrl)
+    }
+  }, [pipelineIdFromUrl])
+
+  // Efeito para carregar estágios e leads quando o pipeline selecionado mudar
   useEffect(() => {
     if (selectedPipeline) {
-      loadStages(selectedPipeline)
-      loadLeadPipelines(selectedPipeline)
+      // Definir loading como true apenas quando estamos carregando dados
+      setLoading(true)
+      
+      // Carregar estágios e leads em paralelo
+      Promise.all([
+        loadStages(selectedPipeline),
+        loadLeadPipelines(selectedPipeline)
+      ])
+      .finally(() => {
+        // Quando ambas as promessas terminarem, definir loading como false
+        setLoading(false)
+      })
     }
   }, [selectedPipeline])
 
   async function loadPipelines() {
     try {
-      setLoading(true)
+      setLoadingPipelines(true)
+      
+      // Verificar se há um time selecionado
+      if (!currentTeam?.id) {
+        setPipelines([])
+        toast.warning("Selecione um time para visualizar os pipelines")
+        setLoadingPipelines(false)
+        return
+      }
+      
+      // Filtrar pipelines pelo time atual
       const { data, error } = await supabase
         .from('pipelines')
         .select('*')
+        .eq('team_id', currentTeam.id)
+        .not('team_id', 'is', null) // Garantir que team_id não seja nulo
         .order('name')
-
+      
       if (error) throw error
       
       setPipelines(data || [])
       
-      // Selecionar o primeiro pipeline por padrão se existir
+      // Se não tiver um pipeline selecionado (nem da URL nem do estado)
       if (data && data.length > 0 && !selectedPipeline) {
         setSelectedPipeline(data[0].id)
+      }
+      
+      // Se tiver um pipeline selecionado (da URL ou do estado), verificar se ele existe na lista
+      if (selectedPipeline && data) {
+        const pipelineExists = data.some(p => p.id === selectedPipeline)
+        if (!pipelineExists && data.length > 0) {
+          // Se o pipeline selecionado não existir, selecionar o primeiro
+          setSelectedPipeline(data[0].id)
+        }
       }
     } catch (error) {
       console.error('Erro ao carregar pipelines:', error)
       toast.error("Erro ao carregar pipelines")
     } finally {
-      setLoading(false)
+      setLoadingPipelines(false)
     }
   }
 
   async function loadStages(pipelineId: string) {
     try {
+      setLoadingStages(true)
       const { data, error } = await supabase
         .from('pipeline_stages')
         .select('*')
@@ -909,37 +952,56 @@ export default function PipelinePage() {
     } catch (error) {
       console.error('Erro ao carregar estágios:', error)
       toast.error("Erro ao carregar estágios do pipeline")
+    } finally {
+      setLoadingStages(false)
     }
   }
 
   async function loadLeadPipelines(pipelineId: string) {
     try {
+      setLoadingLeads(true)
+      
+      // Verificar se há um time selecionado
+      if (!currentTeam?.id) {
+        setLeadPipelines([])
+        setLoadingLeads(false)
+        return
+      }
+      
+      // Filtrar lead_pipelines pelo pipeline selecionado e time atual
       const { data, error } = await supabase
         .from('lead_pipelines')
         .select(`
           *,
-          lead:lead_id (
-            *,
-            company_name:companies(name)
+          lead:leads (
+            id,
+            name,
+            email,
+            phone,
+            company_id,
+            status,
+            custom_fields,
+            created_at
           )
         `)
         .eq('pipeline_id', pipelineId)
-
+        .eq('leads.team_id', currentTeam.id)
+        .not('leads.team_id', 'is', null) // Garantir que team_id não seja nulo
+      
       if (error) throw error
       
-      // Transformar os dados para facilitar o acesso
-      const formattedLeadPipelines = data?.map(item => ({
-        ...item,
-        lead: {
-          ...item.lead,
-          company_name: item.lead?.company_name?.name
-        }
+      // Processar os dados para incluir o lead no objeto leadPipeline
+      const processedLeadPipelines = data?.map(lp => ({
+        ...lp,
+        lead: lp.lead
       })) || []
       
-      setLeadPipelines(formattedLeadPipelines)
+      setLeadPipelines(processedLeadPipelines)
     } catch (error) {
       console.error('Erro ao carregar leads do pipeline:', error)
       toast.error("Erro ao carregar leads do pipeline")
+    } finally {
+      setLoadingLeads(false)
     }
   }
 
@@ -1091,7 +1153,7 @@ export default function PipelinePage() {
             <div className="space-y-1">
               <h1 className="text-2xl font-semibold">Pipeline</h1>
               <p className="text-sm text-muted-foreground">
-                Gerencie o funil de vendas e acompanhe o progresso dos leads
+                Gerencie seus leads através do funil de vendas
               </p>
             </div>
             <div className="flex gap-2">
@@ -1102,14 +1164,10 @@ export default function PipelinePage() {
                 <Settings className="mr-2 h-4 w-4" />
                 Configurar Etapas
               </Button>
-              <Button onClick={() => router.push('/pipeline/novo')}>
-                <Plus className="mr-2 h-4 w-4" />
-                Novo Pipeline
-              </Button>
             </div>
           </div>
 
-          {loading ? (
+          {loadingPipelines ? (
             <div className="flex items-center justify-center h-40">
               <p>Carregando pipelines...</p>
             </div>
@@ -1130,7 +1188,10 @@ export default function PipelinePage() {
                 <div className="w-64">
                   <Select
                     value={selectedPipeline || undefined}
-                    onValueChange={setSelectedPipeline}
+                    onValueChange={(value) => {
+                      // Usar o router para navegar para o pipeline selecionado
+                      router.push(`/pipeline?id=${value}`)
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Selecione um pipeline" />
@@ -1168,7 +1229,11 @@ export default function PipelinePage() {
                 )}
               </div>
 
-              {stages.length === 0 ? (
+              {loading ? (
+                <div className="flex items-center justify-center h-40">
+                  <p>Carregando dados do pipeline...</p>
+                </div>
+              ) : stages.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-40 border rounded-lg p-6">
                   <h3 className="text-lg font-medium mb-2">Nenhum estágio encontrado</h3>
                   <p className="text-sm text-muted-foreground mb-4">

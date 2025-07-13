@@ -33,6 +33,21 @@ import { useForm, Controller } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import * as z from "zod"
 import { toast } from "sonner"
+import { useTeam } from "@/lib/team-context"
+import { 
+  CustomFieldDefinition, 
+  CustomFieldType, 
+  listCustomFields 
+} from "@/lib/supabase"
+import { 
+  Checkbox 
+} from "@/components/ui/checkbox"
+import { 
+  Card, 
+  CardContent, 
+  CardHeader, 
+  CardTitle 
+} from "@/components/ui/card"
 
 interface Company {
   id: string
@@ -68,6 +83,9 @@ export default function LeadFormPage({ params }: PageProps) {
   const [loadingData, setLoadingData] = useState(isEditing)
   const [companies, setCompanies] = useState<Company[]>([])
   const [notes, setNotes] = useState("")
+  const { currentTeam } = useTeam()
+  const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([])
+  const [loadingCustomFields, setLoadingCustomFields] = useState(false)
 
   const {
     register,
@@ -89,13 +107,26 @@ export default function LeadFormPage({ params }: PageProps) {
     if (isEditing) {
       loadLead()
     }
-  }, [isEditing])
+    if (currentTeam?.id) {
+      loadCustomFields()
+    }
+  }, [isEditing, currentTeam])
 
   async function loadCompanies() {
     try {
+      // Verificar se há um time selecionado
+      if (!currentTeam?.id) {
+        setCompanies([])
+        toast.warning("Selecione um time para visualizar as empresas")
+        return
+      }
+      
+      // Filtrar empresas pelo time atual
       const { data, error } = await supabase
         .from('companies')
         .select('id, name')
+        .eq('team_id', currentTeam.id)
+        .not('team_id', 'is', null) // Garantir que team_id não seja nulo
         .order('name')
 
       if (error) throw error
@@ -146,9 +177,33 @@ export default function LeadFormPage({ params }: PageProps) {
     }
   }
 
+  async function loadCustomFields() {
+    try {
+      setLoadingCustomFields(true)
+      
+      if (!currentTeam?.id) {
+        return
+      }
+      
+      const fields = await listCustomFields(currentTeam.id, 'lead')
+      setCustomFields(fields)
+    } catch (error) {
+      console.error('Erro ao carregar campos personalizados:', error)
+    } finally {
+      setLoadingCustomFields(false)
+    }
+  }
+
   async function onSubmit(data: LeadFormData) {
     try {
       setLoading(true)
+      
+      // Verificar se há um time selecionado
+      if (!currentTeam?.id) {
+        toast.error("Selecione um time para salvar o lead")
+        setLoading(false)
+        return
+      }
 
       // Adicionar as notas ao custom_fields
       const customFields = { ...(data.custom_fields || {}) } as CustomFields
@@ -157,10 +212,16 @@ export default function LeadFormPage({ params }: PageProps) {
       }
       data.custom_fields = customFields
 
+      // Garantir que o team_id seja incluído
+      const leadData = {
+        ...data,
+        team_id: currentTeam.id // Usar currentTeam.id diretamente, já que verificamos acima
+      };
+
       if (isEditing) {
         const { error } = await supabase
           .from('leads')
-          .update(data)
+          .update(leadData)
           .eq('id', params.action)
 
         if (error) throw error
@@ -180,7 +241,7 @@ export default function LeadFormPage({ params }: PageProps) {
         // Inserir o novo lead
         const { data: newLead, error } = await supabase
           .from('leads')
-          .insert([data])
+          .insert([leadData])
           .select()
 
         if (error) throw error
@@ -193,7 +254,8 @@ export default function LeadFormPage({ params }: PageProps) {
             description: `Lead "${data.name}" criado`,
             details: { 
               company_id: data.company_id,
-              status: data.status
+              status: data.status,
+              team_id: currentTeam.id // Usar currentTeam.id diretamente
             }
           });
         }
@@ -217,6 +279,170 @@ export default function LeadFormPage({ params }: PageProps) {
     { value: "Em negociação", label: "Em negociação" },
     { value: "Convertido", label: "Convertido" },
   ]
+
+  // Função para renderizar um campo personalizado com base no tipo
+  function renderCustomField(field: CustomFieldDefinition) {
+    const fieldValue = control._formValues.custom_fields?.[field.field_name] || ''
+    
+    switch (field.field_type) {
+      case CustomFieldType.TEXT:
+      case CustomFieldType.EMAIL:
+      case CustomFieldType.PHONE:
+      case CustomFieldType.URL:
+        return (
+          <div className="space-y-2" key={field.id}>
+            <Label htmlFor={`custom_${field.field_name}`}>
+              {field.display_name}
+              {field.is_required && <span className="text-red-500 ml-1">*</span>}
+            </Label>
+            <Controller
+              name={`custom_fields.${field.field_name}`}
+              control={control}
+              defaultValue={fieldValue}
+              render={({ field: controllerField }) => (
+                <Input
+                  id={`custom_${field.field_name}`}
+                  placeholder={`Digite ${field.display_name.toLowerCase()}`}
+                  type={field.field_type === CustomFieldType.EMAIL ? 'email' : 
+                        field.field_type === CustomFieldType.URL ? 'url' : 'text'}
+                  {...controllerField}
+                  required={field.is_required}
+                />
+              )}
+            />
+          </div>
+        )
+        
+      case CustomFieldType.NUMBER:
+        return (
+          <div className="space-y-2" key={field.id}>
+            <Label htmlFor={`custom_${field.field_name}`}>
+              {field.display_name}
+              {field.is_required && <span className="text-red-500 ml-1">*</span>}
+            </Label>
+            <Controller
+              name={`custom_fields.${field.field_name}`}
+              control={control}
+              defaultValue={fieldValue}
+              render={({ field: controllerField }) => (
+                <Input
+                  id={`custom_${field.field_name}`}
+                  placeholder={`Digite ${field.display_name.toLowerCase()}`}
+                  type="number"
+                  {...controllerField}
+                  required={field.is_required}
+                />
+              )}
+            />
+          </div>
+        )
+        
+      case CustomFieldType.DATE:
+        return (
+          <div className="space-y-2" key={field.id}>
+            <Label htmlFor={`custom_${field.field_name}`}>
+              {field.display_name}
+              {field.is_required && <span className="text-red-500 ml-1">*</span>}
+            </Label>
+            <Controller
+              name={`custom_fields.${field.field_name}`}
+              control={control}
+              defaultValue={fieldValue}
+              render={({ field: controllerField }) => (
+                <Input
+                  id={`custom_${field.field_name}`}
+                  type="date"
+                  {...controllerField}
+                  required={field.is_required}
+                />
+              )}
+            />
+          </div>
+        )
+        
+      case CustomFieldType.TEXTAREA:
+        return (
+          <div className="space-y-2" key={field.id}>
+            <Label htmlFor={`custom_${field.field_name}`}>
+              {field.display_name}
+              {field.is_required && <span className="text-red-500 ml-1">*</span>}
+            </Label>
+            <Controller
+              name={`custom_fields.${field.field_name}`}
+              control={control}
+              defaultValue={fieldValue}
+              render={({ field: controllerField }) => (
+                <Textarea
+                  id={`custom_${field.field_name}`}
+                  placeholder={`Digite ${field.display_name.toLowerCase()}`}
+                  {...controllerField}
+                  required={field.is_required}
+                />
+              )}
+            />
+          </div>
+        )
+        
+      case CustomFieldType.SELECT:
+        return (
+          <div className="space-y-2" key={field.id}>
+            <Label htmlFor={`custom_${field.field_name}`}>
+              {field.display_name}
+              {field.is_required && <span className="text-red-500 ml-1">*</span>}
+            </Label>
+            <Controller
+              name={`custom_fields.${field.field_name}`}
+              control={control}
+              defaultValue={fieldValue}
+              render={({ field: controllerField }) => (
+                <Select
+                  onValueChange={controllerField.onChange}
+                  value={controllerField.value}
+                >
+                  <SelectTrigger id={`custom_${field.field_name}`}>
+                    <SelectValue placeholder={`Selecione ${field.display_name.toLowerCase()}`} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {field.field_options?.options?.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </div>
+        )
+        
+      case CustomFieldType.CHECKBOX:
+        return (
+          <div className="flex items-center space-x-2" key={field.id}>
+            <Controller
+              name={`custom_fields.${field.field_name}`}
+              control={control}
+              defaultValue={fieldValue === 'true'}
+              render={({ field: controllerField }) => (
+                <Checkbox
+                  id={`custom_${field.field_name}`}
+                  checked={controllerField.value === 'true'}
+                  onCheckedChange={(checked) => {
+                    controllerField.onChange(checked ? 'true' : 'false');
+                  }}
+                />
+              )}
+            />
+            <Label htmlFor={`custom_${field.field_name}`}>
+              {field.display_name}
+              {field.is_required && <span className="text-red-500 ml-1">*</span>}
+            </Label>
+          </div>
+        )
+        
+      default:
+        return null
+    }
+  }
 
   if (loadingData) {
     return (
@@ -387,28 +613,46 @@ export default function LeadFormPage({ params }: PageProps) {
                 )}
               </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="notes">Observações</Label>
-                <Textarea
-                  id="notes"
-                  placeholder="Informações adicionais sobre o lead"
-                  className="min-h-[120px]"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                />
-              </div>
+              {/* Campos personalizados */}
+              {customFields.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Informações Adicionais</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {customFields
+                        .filter(field => field.is_visible)
+                        .sort((a, b) => a.sort_order - b.sort_order)
+                        .map(field => renderCustomField(field))
+                      }
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
 
-            <div className="flex gap-4">
-              <Button type="submit" disabled={loading}>
-                {loading ? "Salvando..." : "Salvar"}
-              </Button>
+            <div className="space-y-2">
+              <Label htmlFor="notes">Observações</Label>
+              <Textarea
+                id="notes"
+                placeholder="Observações sobre o lead"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={4}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => router.push('/leads')}
               >
                 Cancelar
+              </Button>
+              <Button type="submit" disabled={loading || loadingData}>
+                {loading ? "Salvando..." : "Salvar"}
               </Button>
             </div>
           </form>

@@ -41,6 +41,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Search, Plus, Check } from "lucide-react"
+import { useTeam } from "@/lib/team-context"
 
 interface PageProps {
   params: {
@@ -85,6 +86,7 @@ export default function AddLeadToPipelinePage({ params }: PageProps) {
   const [loading, setLoading] = useState(true)
   const [addingLead, setAddingLead] = useState(false)
   const [selectedLeads, setSelectedLeads] = useState<string[]>([])
+  const { currentTeam } = useTeam()
 
   const {
     control,
@@ -135,6 +137,14 @@ export default function AddLeadToPipelinePage({ params }: PageProps) {
     try {
       setLoading(true)
       
+      // Verificar se há um time selecionado
+      if (!currentTeam?.id) {
+        setLeads([])
+        setFilteredLeads([])
+        toast.warning("Selecione um time para visualizar os leads")
+        return
+      }
+      
       // Carregar leads que ainda não estão neste pipeline
       const { data: existingLeadPipelines, error: existingError } = await supabase
         .from('lead_pipelines')
@@ -146,7 +156,7 @@ export default function AddLeadToPipelinePage({ params }: PageProps) {
       // Extrair IDs de leads que já estão no pipeline
       const existingLeadIds = existingLeadPipelines?.map(lp => lp.lead_id) || []
       
-      // Carregar todos os leads
+      // Carregar todos os leads do time atual
       const { data, error } = await supabase
         .from('leads')
         .select(`
@@ -155,6 +165,8 @@ export default function AddLeadToPipelinePage({ params }: PageProps) {
             name
           )
         `)
+        .eq('team_id', currentTeam.id)
+        .not('team_id', 'is', null)
         .order('name')
       
       if (error) throw error

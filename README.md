@@ -1,6 +1,86 @@
-# Simple CRM
+# Gaia CRM
 
-A simple CRM application designed to manage companies, leads, and sales pipelines. The app allows users to create, list, update, and delete records, with authentication support to protect access. It is built to be easy to use and set up, leveraging modern technologies like Next.js and Supabase.
+Sistema de CRM para gerenciamento de leads, empresas, pipelines e atividades.
+
+## Estrutura do Banco de Dados
+
+### Tabelas Principais
+
+1. **companies** - Armazena informações sobre empresas/clientes
+   - id (PK)
+   - name
+   - email
+   - phone
+   - address
+   - website
+   - created_at
+
+2. **leads** - Armazena informações sobre leads
+   - id (PK)
+   - name
+   - email
+   - phone
+   - company_id (FK -> companies.id)
+   - status
+   - custom_fields (JSONB)
+   - created_at
+
+3. **pipelines** - Armazena informações sobre pipelines de vendas
+   - id (PK)
+   - name
+   - description
+   - created_at
+
+4. **pipeline_stages** - Armazena as etapas de cada pipeline
+   - id (PK)
+   - pipeline_id (FK -> pipelines.id)
+   - stage_name
+   - stage_order
+   - created_at
+
+5. **lead_pipelines** - Relaciona leads com pipelines e suas etapas atuais
+   - id (PK)
+   - lead_id (FK -> leads.id)
+   - pipeline_id (FK -> pipelines.id)
+   - current_stage_id (FK -> pipeline_stages.id)
+   - created_at
+
+6. **lead_activity_logs** - Registra todas as atividades relacionadas a leads
+   - id (PK)
+   - lead_id (FK -> leads.id)
+   - action_type
+   - description
+   - details (JSONB)
+   - user_id
+   - created_at
+
+7. **activities** - Armazena atividades agendadas
+   - id (PK)
+   - title
+   - description
+   - lead_id (FK -> leads.id)
+   - scheduled_date
+   - scheduled_time
+   - completed
+   - completed_at
+   - created_at
+
+## Políticas de Segurança
+
+As seguintes políticas de segurança estão configuradas no Supabase:
+
+- Leitura pública para todas as tabelas
+- Inserção, atualização e exclusão restritas a usuários autenticados
+- Logs de atividades podem ser visualizados apenas pelo usuário que os criou ou por administradores
+
+## Funcionalidades Principais
+
+- Gerenciamento de Empresas
+- Gerenciamento de Leads
+- Pipeline de Vendas com arrastar e soltar
+- Histórico de atividades de leads
+- Agenda de atividades com calendário
+- Registro e acompanhamento de atividades
 
 ## Features
 
