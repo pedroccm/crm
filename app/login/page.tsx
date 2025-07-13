@@ -18,7 +18,7 @@ function LoginForm() {
   const { login, user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") || "/dashboard";
+  const redirect = searchParams?.get("redirect") || "/dashboard";
 
   // Redirecionar se o usuário já estiver autenticado
   useEffect(() => {
