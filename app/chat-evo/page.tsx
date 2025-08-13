@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef, useCallback } from "react"
+import { useState, useEffect, useRef, useCallback, Suspense } from "react"
 import { Search, Send, Smile, Paperclip, MessageSquare, RefreshCw, Menu, Clock, Check, CheckCheck, Mic, MicOff, StopCircle, Trash2, Target, FileText } from "lucide-react"
 import { AppSidebar } from "@/components/app-sidebar"
 import { Input } from "@/components/ui/input"
@@ -76,7 +76,7 @@ interface Contact {
   avatar?: string;
 }
 
-export default function ChatEvoPage() {
+function ChatEvoPageContent() {
   const { user } = useAuth()
   const { currentTeam } = useTeam()
   const searchParams = useSearchParams()
@@ -1185,19 +1185,16 @@ export default function ChatEvoPage() {
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedContact || !apiConfig) return
     
-    try {
-      setSendingMessage(true)
-      
-      // Salvar a mensagem atual antes de limpar o campo
-      const messageText = newMessage.trim()
-      
-      // Limpar o campo de mensagem imediatamente para permitir nova digitação
-      setNewMessage("")
-      
-      // Enviar a mensagem diretamente sem usar setPresence
-      
-      // Criar uma mensagem temporária para exibir imediatamente na tela
-      const tempMessage: EvolutionAPIMessage = {
+    setSendingMessage(true)
+    
+    // Salvar a mensagem atual antes de limpar o campo
+    const messageText = newMessage.trim()
+    
+    // Limpar o campo de mensagem imediatamente para permitir nova digitação
+    setNewMessage("")
+    
+    // Criar uma mensagem temporária para exibir imediatamente na tela
+    const tempMessage: EvolutionAPIMessage = {
         key: {
           id: `temp-${Date.now()}`,
           fromMe: true,
@@ -1216,11 +1213,11 @@ export default function ChatEvoPage() {
       // Garantir que o scroll vá para o final ao enviar mensagem
       setIsAtBottom(true)
       
-      // Enviar a mensagem para a API
-      const result = await sendTextMessage(apiConfig, selectedContact.phone, messageText)
-      
-      // Salvar a mensagem e atualizar a conversa no banco de dados
       try {
+        // Enviar a mensagem para a API
+        const result = await sendTextMessage(apiConfig, selectedContact.phone, messageText)
+      
+        // Salvar a mensagem e atualizar a conversa no banco de dados
         
         // Verificar se a conversa já existe
         const existingChat = await findChatByPhone(apiConfig.team_id, selectedContact.phone)
@@ -1281,13 +1278,8 @@ export default function ChatEvoPage() {
           )
         )
         
-      } catch (dbError) {
-        console.error("Erro ao salvar conversa/mensagem no banco:", dbError)
-        // Continuar mesmo se houver erro ao salvar no banco
-      }
-      
-      // Atualizar a lista de conversas
-      loadConversations()
+        // Atualizar a lista de conversas
+        loadConversations()
     } catch (error) {
       console.error('Erro ao enviar mensagem:', error)
       toast.error("Erro ao enviar mensagem")
@@ -2171,7 +2163,7 @@ export default function ChatEvoPage() {
                         <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">
                           {category}
                         </h4>
-                        {templates.map((template) => (
+                        {(templates as any[]).map((template) => (
                           <div 
                             key={template.id}
                             className="p-3 border rounded-lg hover:bg-muted cursor-pointer transition-colors"
@@ -2212,5 +2204,13 @@ export default function ChatEvoPage() {
         </DialogContent>
       </Dialog>
     </SidebarProvider>
+  )
+}
+
+export default function ChatEvoPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-screen">Carregando...</div>}>
+      <ChatEvoPageContent />
+    </Suspense>
   )
 } 

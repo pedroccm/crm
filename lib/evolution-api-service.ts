@@ -55,7 +55,7 @@ export interface EvolutionAPIMessage {
     };
   };
   messageTimestamp: number;
-  status: string;
+  status?: string;
 }
 
 export interface EvolutionAPIChat {
