@@ -156,8 +156,6 @@ async function makeEvolutionAPIRequest(
   try {
     const url = `${config.instance_url}${endpoint}`;
     
-    console.log(`Fazendo requisição ${method} para: ${url}`);
-    console.log('Corpo da requisição:', body);
     
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
@@ -168,7 +166,6 @@ async function makeEvolutionAPIRequest(
       headers['Authorization'] = `Bearer ${config.security_token}`;
     }
     
-    console.log('Headers:', { ...headers, 'apikey': '***', 'Authorization': '***' });
     
     const options: RequestInit = {
       method,
@@ -189,7 +186,6 @@ async function makeEvolutionAPIRequest(
       responseData = { text: responseText };
     }
     
-    console.log(`Resposta (${response.status}):`, responseData);
     
     if (!response.ok) {
       throw new Error(`Evolution API request failed: ${response.status} ${response.statusText}\nResponse: ${JSON.stringify(responseData)}`);
@@ -272,9 +268,6 @@ export async function sendTextMessage(
     presence?: 'available' | 'composing' | 'recording' | 'paused';
   }
 ) {
-  console.log("Enviando mensagem para:", phone);
-  console.log("Mensagem:", message);
-  console.log("Opções:", options);
   
   // Formato que estava funcionando anteriormente
   const payload = {
@@ -285,7 +278,6 @@ export async function sendTextMessage(
     linkPreview: true
   };
   
-  console.log("Payload:", payload);
   
   return makeEvolutionAPIRequest(
     config,
@@ -387,15 +379,21 @@ export async function findMessages(
 export async function markMessageAsRead(
   config: EvolutionAPIConfig,
   messageId: string,
-  phone: string
+  phone: string,
+  fromMe: boolean = false
 ) {
   return makeEvolutionAPIRequest(
     config,
     `/chat/markMessageAsRead/${config.instance_name}`,
     'POST',
     {
-      id: messageId,
-      remoteJid: `${phone}@s.whatsapp.net`
+      readMessages: [
+        {
+          id: messageId,
+          remoteJid: `${phone}@s.whatsapp.net`,
+          fromMe: fromMe
+        }
+      ]
     }
   );
 }
@@ -429,7 +427,6 @@ export async function checkIsWhatsApp(
   config: EvolutionAPIConfig,
   phone: string
 ) {
-  console.log("Verificando se o número é WhatsApp:", phone);
   
   // Formato correto conforme a documentação
   // POST /chat/whatsappNumbers/{instance}
@@ -442,7 +439,6 @@ export async function checkIsWhatsApp(
       numbers: [phone]
     }
   ).then(response => {
-    console.log("Resposta da verificação:", response);
     
     // A resposta é um array, pegamos o primeiro item
     if (Array.isArray(response) && response.length > 0) {
@@ -458,7 +454,6 @@ export async function setPresence(
   presence: 'available' | 'unavailable' | 'composing' | 'recording' | 'paused',
   phone: string
 ) {
-  console.log(`Definindo presença para ${phone}: ${presence}`);
   
   // Formato que estava funcionando anteriormente
   return makeEvolutionAPIRequest(

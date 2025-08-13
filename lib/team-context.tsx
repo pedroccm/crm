@@ -48,6 +48,8 @@ interface TeamContextType {
   members: TeamMember[];
   invitations: TeamInvitation[];
   isLoading: boolean;
+  isLoadingTeams: boolean;
+  isTeamReady: boolean;
   isSuperAdmin: boolean;
   isTeamAdmin: boolean;
   needsTeam: boolean;
@@ -73,11 +75,18 @@ export function TeamProvider({ children }: { children: ReactNode }) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [invitations, setInvitations] = useState<TeamInvitation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingTeams, setIsLoadingTeams] = useState(false);
+  const [isTeamReady, setIsTeamReady] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isTeamAdmin, setIsTeamAdmin] = useState(false);
   const [needsTeam, setNeedsTeam] = useState(false);
   const { user } = useAuth();
   const router = useRouter();
+
+  // Log para debug quando currentTeam mudar
+  useEffect(() => {
+    console.log("TeamProvider: currentTeam mudou para:", currentTeam);
+  }, [currentTeam]);
 
   // Carregar times do usuário ao inicializar
   useEffect(() => {
@@ -85,15 +94,25 @@ export function TeamProvider({ children }: { children: ReactNode }) {
     
     if (user) {
       console.log("TeamProvider: usuário autenticado, carregando times...");
-      fetchTeams().catch(err => {
-        console.error("TeamProvider: erro ao carregar times:", err);
-      });
+      setIsLoadingTeams(true);
       
-      checkSuperAdmin().catch(err => {
-        console.error("TeamProvider: erro ao verificar super admin:", err);
-      });
+      const initializeTeamContext = async () => {
+        try {
+          await fetchTeams();
+          await checkSuperAdmin();
+        } catch (err) {
+          console.error("TeamProvider: erro ao inicializar:", err);
+        } finally {
+          setIsLoadingTeams(false);
+          setIsTeamReady(true); // Teams carregados com sucesso
+        }
+      };
+      
+      initializeTeamContext();
     } else {
       console.log("TeamProvider: usuário não autenticado");
+      setIsLoadingTeams(false);
+      setIsTeamReady(true); // Mesmo sem usuário, team context está "pronto"
     }
   }, [user]);
 
@@ -271,14 +290,22 @@ export function TeamProvider({ children }: { children: ReactNode }) {
       setTeams(teamsData);
       
       // Se não houver time atual selecionado, selecionar o primeiro
-      if (!currentTeam && teamsData.length > 0) {
-        console.log("fetchTeams: selecionando o primeiro time como atual:", teamsData[0]);
-        setCurrentTeam(teamsData[0]);
+      if (teamsData.length > 0) {
+        // Verificar se o currentTeam atual ainda existe na lista
+        const currentTeamExists = currentTeam && teamsData.some(team => team.id === currentTeam.id);
         
-        // Carregar membros do time selecionado
-        fetchTeamMembers(teamsData[0].id).catch(err => {
-          console.error("fetchTeams: erro ao carregar membros do time:", err);
-        });
+        if (!currentTeamExists) {
+          console.log("fetchTeams: selecionando o primeiro time como atual:", teamsData[0]);
+          console.log("fetchTeams: currentTeam antes de setCurrentTeam:", currentTeam);
+          setCurrentTeam(teamsData[0]);
+          
+          // Carregar membros do time selecionado
+          fetchTeamMembers(teamsData[0].id).catch(err => {
+            console.error("fetchTeams: erro ao carregar membros do time:", err);
+          });
+        } else {
+          console.log("fetchTeams: mantendo time atual:", currentTeam);
+        }
       }
       
       setIsLoading(false);
@@ -450,26 +477,42 @@ export function TeamProvider({ children }: { children: ReactNode }) {
 
       console.log("Time criado com sucesso:", newTeam);
 
-      // Adicionar criador como owner do time
-      console.log("Adicionando criador como owner do time:", {
-        team_id: newTeam.id,
-        user_id: user.id,
-        role: 'owner'
-      });
-      
-      const { error: memberError } = await supabase
+      // Verificar se o usuário já é membro do time
+      const { data: existingMember, error: checkError } = await supabase
         .from("team_members")
-        .insert({
+        .select("id")
+        .eq("team_id", newTeam.id)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error("Erro ao verificar membro existente:", checkError);
+      }
+
+      // Adicionar criador como owner do time apenas se não for membro
+      if (!existingMember) {
+        console.log("Adicionando criador como owner do time:", {
           team_id: newTeam.id,
           user_id: user.id,
           role: 'owner'
         });
+        
+        const { error: memberError } = await supabase
+          .from("team_members")
+          .insert({
+            team_id: newTeam.id,
+            user_id: user.id,
+            role: 'owner'
+          });
 
-      if (memberError) {
-        console.error("Erro ao adicionar membro ao time:", memberError);
-        console.error("Detalhes do erro:", memberError);
-        toast.error("Erro ao adicionar você como membro do time");
-        return null;
+        if (memberError) {
+          console.error("Erro ao adicionar membro ao time:", memberError);
+          console.error("Detalhes do erro:", memberError);
+          toast.error("Erro ao adicionar você como membro do time");
+          return null;
+        }
+      } else {
+        console.log("Usuário já é membro do time:", existingMember);
       }
 
       // Atualizar lista de times
@@ -745,6 +788,8 @@ export function TeamProvider({ children }: { children: ReactNode }) {
         members,
         invitations,
         isLoading,
+        isLoadingTeams,
+        isTeamReady,
         isSuperAdmin,
         isTeamAdmin,
         needsTeam,

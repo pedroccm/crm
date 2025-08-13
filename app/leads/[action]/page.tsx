@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { supabase, logLeadActivity, LeadLogActionType } from "@/lib/supabase"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { useEffect, useState } from "react"
 import { useForm, Controller } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -78,6 +78,7 @@ interface PageProps {
 
 export default function LeadFormPage({ params }: PageProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const isEditing = params.action !== "novo"
   const [loading, setLoading] = useState(false)
   const [loadingData, setLoadingData] = useState(isEditing)
@@ -111,6 +112,16 @@ export default function LeadFormPage({ params }: PageProps) {
       loadCustomFields()
     }
   }, [isEditing, currentTeam])
+
+  // useEffect para preencher telefone quando vier da URL
+  useEffect(() => {
+    if (!isEditing && searchParams) {
+      const phoneParam = searchParams.get('phone')
+      if (phoneParam) {
+        setValue('phone', decodeURIComponent(phoneParam))
+      }
+    }
+  }, [searchParams, isEditing, setValue])
 
   async function loadCompanies() {
     try {

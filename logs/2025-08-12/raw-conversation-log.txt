@@ -1,0 +1,16 @@
+RAW CONVERSATION LOG - 12/08/2025
+==========================================
+
+[HUMAN]
+http://localhost:3000/chat-evo
+
+Aqui o problema é que eu mandei uma mensagem com um link muito grande e aí ele quebrou todo o layout.
+
+Porque é um link com muitas letras e muito grande, aí ele ficou grande na horizontal e quebrou todo o layout.
+
+[ASSISTANT]
+Vou analisar o problema de quebra de layout causado por links muito longos na página de chat. Primeiro, deixe-me examinar o código atual.
+
+<function_calls>
+<invoke name="Read">
+<parameter name="file_path">D:\sites\gaia-crm\app\chat-evo\page.tsx

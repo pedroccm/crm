@@ -33,7 +33,8 @@ import {
   Building2, 
   Bell, 
   Shield, 
-  Database 
+  Database,
+  FileText 
 } from "lucide-react"
 
 export default function ConfiguracoesPage() {
@@ -51,6 +52,12 @@ export default function ConfiguracoesPage() {
       description: "Configure a integração com a Evolution API",
       icon: MessageSquare,
       href: "/configuracoes/evolution-api"
+    },
+    {
+      title: "Templates de Mensagens",
+      description: "Gerencie templates para acelerar o atendimento",
+      icon: FileText,
+      href: "/configuracoes/templates"
     },
     {
       title: "Integrações",

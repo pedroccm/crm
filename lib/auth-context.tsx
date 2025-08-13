@@ -10,6 +10,7 @@ import { supabase } from "@/lib/supabase";
 interface AuthContextType {
   user: User | null;
   loading: boolean;
+  isAuthReady: boolean;
   login: (credentials: UserCredentials, redirectPath?: string) => Promise<void>;
   register: (userData: UserRegistration, redirectPath?: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -22,6 +23,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isAuthReady, setIsAuthReady] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -37,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
       } finally {
         setLoading(false);
+        setIsAuthReady(true); // Auth está pronto independentemente de ter usuário ou não
       }
     }
 
@@ -46,14 +49,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: authListener } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log("Evento de autenticação detectado:", event);
-        if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+        
+        // Evitar execuções duplicadas
+        if (event === "SIGNED_IN") {
           console.log("Usuário autenticado, atualizando estado...");
-          const { user: currentUser } = await getCurrentUser();
-          setUser(currentUser);
+          try {
+            const { user: currentUser } = await getCurrentUser();
+            setUser(currentUser);
+          } catch (error) {
+            console.error("Erro ao obter usuário após SIGNED_IN:", error);
+            setUser(null);
+          }
         } else if (event === "SIGNED_OUT") {
           console.log("Usuário desconectado, limpando estado...");
           setUser(null);
         }
+        // Remover TOKEN_REFRESHED para evitar duplicação
       }
     );
 
@@ -194,6 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = {
     user,
     loading,
+    isAuthReady,
     login,
     register,
     logout,

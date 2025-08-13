@@ -26,7 +26,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { supabase } from "@/lib/supabase"
-import { Plus, Search, Trash2, Info, Pencil } from "lucide-react"
+import { Plus, Search, Trash2, Info, Pencil, MessageSquare } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
@@ -208,6 +208,7 @@ export default function LeadsPage() {
                 <TableRow>
                   <TableHead>Nome</TableHead>
                   <TableHead>Email</TableHead>
+                  <TableHead>Telefone</TableHead>
                   <TableHead>Empresa</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Data</TableHead>
@@ -217,13 +218,13 @@ export default function LeadsPage() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center">
+                    <TableCell colSpan={7} className="text-center">
                       Carregando...
                     </TableCell>
                   </TableRow>
                 ) : filteredLeads.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center">
+                    <TableCell colSpan={7} className="text-center">
                       Nenhum lead encontrado
                     </TableCell>
                   </TableRow>
@@ -252,6 +253,7 @@ export default function LeadsPage() {
                         </div>
                       </TableCell>
                       <TableCell>{lead.email}</TableCell>
+                      <TableCell>{lead.phone || "-"}</TableCell>
                       <TableCell>{lead.company_name || "-"}</TableCell>
                       <TableCell>
                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusClass(lead.status)}`}>
@@ -263,6 +265,29 @@ export default function LeadsPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center space-x-2">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => {
+                              if (!lead.phone) {
+                                toast.error("Lead não possui telefone cadastrado");
+                                return;
+                              }
+                              
+                              // Formatar telefone para o chat
+                              let phoneNumber = lead.phone.replace(/\D/g, '');
+                              if (phoneNumber.length === 11 && phoneNumber.startsWith('11')) {
+                                phoneNumber = '55' + phoneNumber; // Adicionar código do país
+                              } else if (phoneNumber.length === 10) {
+                                phoneNumber = '5511' + phoneNumber; // Adicionar código do país e área
+                              }
+                              
+                              router.push(`/chat-evo?phone=${phoneNumber}`);
+                            }}
+                            title="Conversar com o lead"
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                          </Button>
                           <Button
                             variant="ghost"
                             size="icon"

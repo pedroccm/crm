@@ -244,18 +244,10 @@ export async function getLeadActivityLogs(leadId: string) {
   try {
     console.log('Buscando logs de atividade para o lead:', leadId);
     
-    // Buscar logs com informações do usuário
-    const { data, error } = await supabase
+    // Buscar logs primeiro sem JOIN
+    const { data: logs, error } = await supabase
       .from('lead_activity_logs')
-      .select(`
-        *,
-        profiles:user_id (
-          id,
-          email,
-          name,
-          role
-        )
-      `)
+      .select('*')
       .eq('lead_id', leadId)
       .order('created_at', { ascending: false });
     
@@ -264,13 +256,40 @@ export async function getLeadActivityLogs(leadId: string) {
       throw error;
     }
     
-    // Formatar os dados para incluir informações do usuário de forma mais acessível
-    const formattedLogs = data?.map(log => ({
-      ...log,
-      user_name: log.profiles?.name || log.profiles?.email || 'Sistema',
-      user_email: log.profiles?.email || '',
-      user_role: log.profiles?.role || ''
-    })) || [];
+    if (!logs || logs.length === 0) {
+      console.log('Nenhum log de atividade encontrado');
+      return [];
+    }
+    
+    // Buscar informações dos usuários separadamente
+    const userIds = [...new Set(logs.map(log => log.user_id).filter(Boolean))];
+    
+    let usersData: any[] = [];
+    if (userIds.length > 0) {
+      const { data: users } = await supabase
+        .from('profiles')
+        .select('id, email, name, role')
+        .in('id', userIds);
+      
+      usersData = users || [];
+    }
+    
+    // Criar um mapa de usuários para acesso rápido
+    const usersMap = usersData.reduce((acc, user) => {
+      acc[user.id] = user;
+      return acc;
+    }, {});
+    
+    // Formatar os logs com informações do usuário
+    const formattedLogs = logs.map(log => {
+      const user = usersMap[log.user_id];
+      return {
+        ...log,
+        user_name: user?.name || user?.email || 'Sistema',
+        user_email: user?.email || '',
+        user_role: user?.role || ''
+      };
+    });
     
     console.log('Logs de atividade encontrados:', formattedLogs.length);
     return formattedLogs;
@@ -299,6 +318,9 @@ export async function createActivity(activity: Activity) {
   try {
     console.log('Criando nova atividade:', activity);
     
+    // Obter usuário atual
+    const { data: { user } } = await supabase.auth.getUser();
+    
     const { data, error } = await supabase
       .from('activities')
       .insert({
@@ -309,6 +331,7 @@ export async function createActivity(activity: Activity) {
         scheduled_date: activity.scheduled_date,
         scheduled_time: activity.scheduled_time || null,
         completed: false,
+        created_by: user?.id || null,
         created_at: new Date().toISOString()
       })
       .select();
@@ -911,9 +934,19 @@ export async function getCurrentUser() {
   console.log("Verificando usuário atual...");
   
   try {
-    // Verificar se há uma sessão ativa
+    // Criar uma Promise que resolve com timeout mais curto
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Timeout na verificação de sessão')), 3000); // 3 segundos
+    });
+
+    // Verificar se há uma sessão ativa com timeout
     console.log("Verificando sessão...");
-    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    const sessionPromise = supabase.auth.getSession();
+    
+    const { data: sessionData, error: sessionError } = await Promise.race([
+      sessionPromise,
+      timeoutPromise
+    ]) as any;
     
     if (sessionError) {
       console.error("Erro ao verificar sessão:", sessionError);
@@ -925,9 +958,14 @@ export async function getCurrentUser() {
       return { user: null };
     }
     
-    // Obter dados do usuário
+    // Obter dados do usuário com timeout
     console.log("Obtendo dados do usuário...");
-    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const userPromise = supabase.auth.getUser();
+    
+    const { data: userData, error: userError } = await Promise.race([
+      userPromise,
+      timeoutPromise
+    ]) as any;
     
     if (userError) {
       console.error("Erro ao obter dados do usuário:", userError);
@@ -1302,9 +1340,21 @@ export interface CustomFieldDefinition {
   updated_at?: string;
 }
 
+// Cache simples para evitar múltiplas chamadas consecutivas
+const customFieldsCache = new Map<string, { data: CustomFieldDefinition[], timestamp: number }>();
+
 // Função para listar campos personalizados por tipo de entidade e time
 export async function listCustomFields(teamId: string, entityType: 'lead' | 'company'): Promise<CustomFieldDefinition[]> {
   try {
+    const cacheKey = `${teamId}-${entityType}`;
+    const cached = customFieldsCache.get(cacheKey);
+    
+    // Se tem cache e foi há menos de 30 segundos, usar o cache
+    if (cached && (Date.now() - cached.timestamp < 30000)) {
+      console.log(`Usando cache para campos personalizados ${entityType} do time ${teamId}`);
+      return cached.data;
+    }
+    
     console.log(`Listando campos personalizados para ${entityType} do time ${teamId}`);
     
     const { data, error } = await supabase
@@ -1318,6 +1368,12 @@ export async function listCustomFields(teamId: string, entityType: 'lead' | 'com
       console.error(`Erro ao listar campos personalizados para ${entityType}:`, error);
       throw error;
     }
+    
+    // Atualizar o cache
+    customFieldsCache.set(cacheKey, {
+      data: data || [],
+      timestamp: Date.now()
+    });
     
     console.log(`${data?.length || 0} campos personalizados encontrados para ${entityType}`);
     return data || [];

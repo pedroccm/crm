@@ -38,7 +38,7 @@ type PipelineFormData = z.infer<typeof pipelineSchema>
 export default function NovoPipelinePage() {
   const router = useRouter()
   const [loading, setLoading] = useState(false)
-  const { currentTeam } = useTeam()
+  const { currentTeam, isLoadingTeams } = useTeam()
   
   const {
     register,
@@ -52,7 +52,12 @@ export default function NovoPipelinePage() {
     try {
       setLoading(true)
       
-      // Verificar se há um time selecionado
+      // Verificar se ainda está carregando ou se há um time selecionado
+      if (isLoadingTeams) {
+        toast.error("Aguarde o carregamento dos times")
+        return
+      }
+      
       if (!currentTeam?.id) {
         toast.error("Selecione um time para criar um pipeline")
         return
@@ -164,8 +169,8 @@ export default function NovoPipelinePage() {
             </div>
 
             <div className="flex gap-2">
-              <Button type="submit" disabled={loading}>
-                {loading ? "Criando..." : "Criar Pipeline"}
+              <Button type="submit" disabled={loading || isLoadingTeams}>
+                {loading ? "Criando..." : isLoadingTeams ? "Carregando..." : "Criar Pipeline"}
               </Button>
               <Button
                 type="button"

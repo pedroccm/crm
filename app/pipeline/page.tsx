@@ -57,6 +57,7 @@ import {
 } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
 import { useTeam } from "@/lib/team-context"
+import { useAuth } from "@/lib/auth-context"
 
 interface Pipeline {
   id: string
@@ -198,6 +199,7 @@ const LeadDetailsSheet = ({
   onClose: () => void,
   getStatusClass: (status: string) => string
 }) => {
+  const router = useRouter();
   const [companyDetails, setCompanyDetails] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [customFieldName, setCustomFieldName] = useState("");
@@ -680,6 +682,28 @@ const LeadDetailsSheet = ({
             {/* Botões de ação */}
             <div className="flex gap-2 pt-4 border-t">
               <Button 
+                variant="outline"
+                className="flex-1"
+                onClick={() => {
+                  // Construir URL do chat-evo com o número do lead
+                  let phoneNumber = localLead.phone?.replace(/\D/g, ''); // Remove caracteres não numéricos
+                  if (phoneNumber) {
+                    // Garantir que o telefone tenha o código do país (55 para Brasil)
+                    if (phoneNumber.length === 11 && phoneNumber.startsWith('11')) {
+                      phoneNumber = '55' + phoneNumber; // Adicionar código do país
+                    } else if (phoneNumber.length === 10) {
+                      phoneNumber = '5511' + phoneNumber; // Adicionar código do país e área
+                    }
+                    router.push(`/chat-evo?phone=${phoneNumber}`);
+                  } else {
+                    toast.error("Lead não possui telefone cadastrado");
+                  }
+                }}
+              >
+                <Mail className="h-4 w-4 mr-2" />
+                Conversar com o Lead
+              </Button>
+              <Button 
                 className="flex-1"
                 onClick={() => window.open(`/leads/${localLead.id}`, '_blank')}
               >
@@ -861,46 +885,124 @@ function PipelineContent() {
   const [loadingStages, setLoadingStages] = useState(false)
   const [isAddingStage, setIsAddingStage] = useState(false)
   const [newStageName, setNewStageName] = useState("")
-  const { currentTeam } = useTeam()
+  const { currentTeam, isLoadingTeams, isTeamReady } = useTeam()
+  const { isAuthReady } = useAuth()
 
-  // Efeito para carregar pipelines quando o time mudar
-  useEffect(() => {
-    loadPipelines()
-  }, [currentTeam])
+  // NOVO SISTEMA: Estados de inicialização centralizados
+  const [initializationState, setInitializationState] = useState<
+    'waiting_auth' | 'waiting_team' | 'ready' | 'loading_data' | 'initialized'
+  >('waiting_auth')
 
-  // Efeito para definir o pipeline selecionado a partir da URL
+  // NOVO SISTEMA: Controle centralizado de inicialização
   useEffect(() => {
-    if (pipelineIdFromUrl) {
-      setSelectedPipeline(pipelineIdFromUrl)
+    console.log('🔄 Pipeline: Estado atual:', {
+      isAuthReady,
+      isTeamReady,
+      currentTeamId: currentTeam?.id,
+      initializationState
+    })
+
+    // Estado 1: Aguardando autenticação
+    if (!isAuthReady) {
+      setInitializationState('waiting_auth')
+      return
     }
-  }, [pipelineIdFromUrl])
 
-  // Efeito para carregar estágios e leads quando o pipeline selecionado mudar
+    // Estado 2: Auth pronto, aguardando team
+    if (!isTeamReady) {
+      setInitializationState('waiting_team')
+      return
+    }
+
+    // Estado 3: Tudo pronto, pode inicializar
+    if (currentTeam?.id && initializationState !== 'ready' && initializationState !== 'loading_data' && initializationState !== 'initialized') {
+      console.log('✅ Pipeline: Todos os contextos prontos - Iniciando carregamento')
+      setInitializationState('ready')
+    }
+
+    // Estado 4: Contextos prontos mas sem team (erro)
+    if (!currentTeam?.id && isAuthReady && isTeamReady) {
+      console.log('⚠️ Pipeline: Contextos prontos mas sem currentTeam')
+      setInitializationState('waiting_team') // Voltar a aguardar
+    }
+  }, [isAuthReady, isTeamReady, currentTeam?.id, initializationState])
+
+  // NOVO SISTEMA: Inicialização única quando estado = 'ready'
   useEffect(() => {
-    if (selectedPipeline) {
-      // Definir loading como true apenas quando estamos carregando dados
-      setLoading(true)
+    if (initializationState === 'ready') {
+      console.log('🚀 Pipeline: Iniciando carregamento inicial para team:', currentTeam?.name)
+      setInitializationState('loading_data')
+      initializePipelinePage()
+    }
+  }, [initializationState])
+
+  // NOVO SISTEMA: Função de inicialização única
+  const initializePipelinePage = async () => {
+    try {
+      // 1. Carregar pipelines
+      console.log('📋 Pipeline: Carregando pipelines...')
+      await loadPipelines()
       
-      // Carregar estágios e leads em paralelo
-      Promise.all([
-        loadStages(selectedPipeline),
-        loadLeadPipelines(selectedPipeline)
-      ])
-      .finally(() => {
-        // Quando ambas as promessas terminarem, definir loading como false
-        setLoading(false)
-      })
+      // 2. Se há pipeline na URL, usar ele
+      if (pipelineIdFromUrl) {
+        console.log('🔗 Pipeline: Pipeline da URL detectado:', pipelineIdFromUrl)
+        setSelectedPipeline(pipelineIdFromUrl)
+        await loadPipelineData(pipelineIdFromUrl)
+      }
+      // 3. Se não há pipeline na URL mas há pipelines, usar o primeiro
+      else {
+        const { data: pipelineData } = await supabase
+          .from('pipelines')
+          .select('*')
+          .eq('team_id', currentTeam?.id)
+          .order('name')
+        
+        if (pipelineData && pipelineData.length > 0) {
+          console.log('📋 Pipeline: Selecionando primeiro pipeline:', pipelineData[0].name)
+          setSelectedPipeline(pipelineData[0].id)
+          await loadPipelineData(pipelineData[0].id)
+        }
+      }
+      
+      console.log('✅ Pipeline: Inicialização completa')
+      setInitializationState('initialized')
+    } catch (error) {
+      console.error('❌ Pipeline: Erro na inicialização:', error)
+      setInitializationState('ready') // Permitir retry
     }
-  }, [selectedPipeline])
+  }
+
+  // NOVO SISTEMA: Carregamento de dados de um pipeline específico
+  const loadPipelineData = async (pipelineId: string) => {
+    console.log('📊 Pipeline: Carregando dados para pipeline:', pipelineId)
+    setLoading(true)
+    
+    try {
+      await Promise.all([
+        loadStages(pipelineId),
+        loadLeadPipelines(pipelineId)
+      ])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // NOVO SISTEMA: Re-carregar dados quando pipeline mudar (após inicialização)
+  useEffect(() => {
+    if (initializationState === 'initialized' && selectedPipeline) {
+      console.log('🔄 Pipeline: Pipeline mudou após inicialização, recarregando dados')
+      loadPipelineData(selectedPipeline)
+    }
+  }, [selectedPipeline, initializationState])
 
   async function loadPipelines() {
     try {
       setLoadingPipelines(true)
       
-      // Verificar se há um time selecionado
+      // Esta função só é chamada quando currentTeam já existe
       if (!currentTeam?.id) {
+        console.error('❌ Pipeline: loadPipelines chamado sem currentTeam')
         setPipelines([])
-        toast.warning("Selecione um time para visualizar os pipelines")
         setLoadingPipelines(false)
         return
       }
@@ -915,21 +1017,9 @@ function PipelineContent() {
       
       if (error) throw error
       
+      console.log('✅ Pipeline: Pipelines carregados:', data?.length, 'pipelines')
       setPipelines(data || [])
-      
-      // Se não tiver um pipeline selecionado (nem da URL nem do estado)
-      if (data && data.length > 0 && !selectedPipeline) {
-        setSelectedPipeline(data[0].id)
-      }
-      
-      // Se tiver um pipeline selecionado (da URL ou do estado), verificar se ele existe na lista
-      if (selectedPipeline && data) {
-        const pipelineExists = data.some(p => p.id === selectedPipeline)
-        if (!pipelineExists && data.length > 0) {
-          // Se o pipeline selecionado não existir, selecionar o primeiro
-          setSelectedPipeline(data[0].id)
-        }
-      }
+      return data
     } catch (error) {
       console.error('Erro ao carregar pipelines:', error)
       toast.error("Erro ao carregar pipelines")
@@ -958,11 +1048,14 @@ function PipelineContent() {
   }
 
   async function loadLeadPipelines(pipelineId: string) {
+    console.log('📋 Pipeline: Carregando leads para pipeline:', pipelineId)
+    
     try {
       setLoadingLeads(true)
       
-      // Verificar se há um time selecionado
+      // Esta função só é chamada quando tudo está pronto
       if (!currentTeam?.id) {
+        console.error('❌ Pipeline: loadLeadPipelines chamado sem currentTeam')
         setLeadPipelines([])
         setLoadingLeads(false)
         return
@@ -996,6 +1089,7 @@ function PipelineContent() {
         lead: lp.lead
       })) || []
       
+      console.log('Pipeline: setLeadPipelines com', processedLeadPipelines.length, 'leads processados')
       setLeadPipelines(processedLeadPipelines)
     } catch (error) {
       console.error('Erro ao carregar leads do pipeline:', error)
@@ -1167,9 +1261,16 @@ function PipelineContent() {
             </div>
           </div>
 
-          {loadingPipelines ? (
+          {initializationState !== 'initialized' ? (
             <div className="flex items-center justify-center h-40">
-              <p>Carregando pipelines...</p>
+              <p>Carregando...</p>
+            </div>
+          ) : !currentTeam?.id ? (
+            <div className="flex flex-col items-center justify-center h-40 border rounded-lg p-6">
+              <h3 className="text-lg font-medium mb-2">Nenhum time selecionado</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Selecione um time para visualizar e gerenciar seus pipelines
+              </p>
             </div>
           ) : pipelines.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 border rounded-lg p-6">

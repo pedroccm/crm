@@ -14,7 +14,8 @@ import {
   Wrench,
   UserCog,
   MessageSquare,
-  UsersRound
+  UsersRound,
+  FileText
 } from "lucide-react"
 import Link from "next/link"
 import {
@@ -263,6 +264,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         {
           title: "Evolution API",
           url: "/configuracoes/evolution-api",
+        },
+        {
+          title: "Templates de Mensagens",
+          url: "/configuracoes/templates",
         },
       ],
     },
