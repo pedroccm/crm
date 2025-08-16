@@ -21,8 +21,19 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { Textarea } from "@/components/ui/textarea"
+import { 
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Check, ChevronsUpDown } from "lucide-react"
 import { toast } from "sonner"
 import { useTeam } from "@/lib/team-context"
+import { supabase } from "@/lib/supabase"
 import { 
   getEvolutionAPIConfig, 
   sendTextMessage, 
@@ -36,30 +47,93 @@ import {
   EvolutionAPIConfig
 } from "@/lib/evolution-api-service"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { MessageSquare, AlertCircle, Loader2 } from "lucide-react"
+import { MessageSquare, AlertCircle, Loader2, User, FileText } from "lucide-react"
 
 export default function NovaChatEvoPage() {
   const router = useRouter()
   const { currentTeam } = useTeam()
+  const [selectedLeadId, setSelectedLeadId] = useState<string>("")
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("")
+  const [leads, setLeads] = useState<any[]>([])
+  const [templates, setTemplates] = useState<any[]>([])
+  const [leadSearchOpen, setLeadSearchOpen] = useState(false)
   const [phone, setPhone] = useState("")
   const [message, setMessage] = useState("")
   const [loading, setLoading] = useState(false)
+  const [loadingData, setLoadingData] = useState(true)
   const [checking, setChecking] = useState(false)
   const [isWhatsApp, setIsWhatsApp] = useState<boolean | null>(null)
   const [apiConfig, setApiConfig] = useState<EvolutionAPIConfig | null>(null)
   const [configError, setConfigError] = useState(false)
 
-  // Carregar configuração da Evolution API
+  // Carregar configuração da Evolution API, leads e templates
   useEffect(() => {
-    async function loadConfig() {
+    async function loadData() {
       if (currentTeam?.id) {
-        const config = await getEvolutionAPIConfig(currentTeam.id)
-        setApiConfig(config)
-        setConfigError(!config)
+        setLoadingData(true)
+        try {
+          // Carregar configuração da API
+          const config = await getEvolutionAPIConfig(currentTeam.id)
+          setApiConfig(config)
+          setConfigError(!config)
+          
+          // Carregar leads
+          try {
+            const { data: leadsData, error: leadsError } = await supabase
+              .from('leads')
+              .select(`
+                id,
+                name,
+                email,
+                phone,
+                company_id,
+                companies:company_id (
+                  id,
+                  name
+                )
+              `)
+              .eq('team_id', currentTeam.id)
+              .order('name')
+            
+            if (!leadsError && leadsData) {
+              setLeads(leadsData)
+            } else if (leadsError) {
+              console.error('Erro ao carregar leads:', leadsError)
+            }
+          } catch (err) {
+            console.error('Erro ao buscar leads:', err)
+          }
+          
+          // Carregar templates de mensagem
+          try {
+            const { data: templatesData, error: templatesError } = await supabase
+              .from('message_templates')
+              .select('id, name, content, variables, category')
+              .eq('team_id', currentTeam.id)
+              .eq('is_active', true)
+              .order('name')
+            
+            if (!templatesError && templatesData) {
+              setTemplates(templatesData)
+            } else if (templatesError) {
+              console.error('Erro ao carregar templates:', templatesError)
+              // Se a tabela não existir, apenas ignore silenciosamente
+              if (templatesError.code !== 'PGRST116') {
+                console.warn('Tabela message_templates pode não existir ainda')
+              }
+            }
+          } catch (err) {
+            console.error('Erro ao buscar templates:', err)
+          }
+        } catch (error) {
+          console.error('Erro ao carregar dados:', error)
+        } finally {
+          setLoadingData(false)
+        }
       }
     }
     
-    loadConfig()
+    loadData()
   }, [currentTeam])
 
   // Função para iniciar uma conversa
@@ -201,10 +275,55 @@ export default function NovaChatEvoPage() {
     }
   }
 
+  // Handler para seleção de lead
+  const handleLeadSelect = (leadId: string) => {
+    const selectedLead = leads.find(lead => lead.id === leadId)
+    if (selectedLead) {
+      setSelectedLeadId(leadId)
+      setPhone(selectedLead.phone || '')
+      // Resetar o status de verificação quando o lead mudar
+      if (isWhatsApp !== null) {
+        setIsWhatsApp(null)
+      }
+    }
+  }
+  
+  // Handler para seleção de template
+  const handleTemplateSelect = (templateId: string) => {
+    const selectedTemplate = templates.find(template => template.id === templateId)
+    if (selectedTemplate) {
+      setSelectedTemplateId(templateId)
+      
+      // Substituir variáveis do template com dados do lead selecionado
+      let templateContent = selectedTemplate.content
+      
+      if (selectedLeadId) {
+        const selectedLead = leads.find(lead => lead.id === selectedLeadId)
+        if (selectedLead) {
+          // Substituir variáveis comuns
+          templateContent = templateContent.replace(/{{name}}/g, selectedLead.name || '')
+          templateContent = templateContent.replace(/{{email}}/g, selectedLead.email || '')
+          templateContent = templateContent.replace(/{{phone}}/g, selectedLead.phone || '')
+          templateContent = templateContent.replace(/{{company}}/g, selectedLead.companies?.name || '')
+        }
+      }
+      
+      setMessage(templateContent)
+    }
+  }
+  
   // Handler para o campo de telefone
   const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     // Usar o valor diretamente, sem formatação
     setPhone(e.target.value)
+    
+    // Resetar seleção de lead se o telefone for alterado manualmente
+    if (selectedLeadId) {
+      const selectedLead = leads.find(lead => lead.id === selectedLeadId)
+      if (selectedLead && selectedLead.phone !== e.target.value) {
+        setSelectedLeadId('')
+      }
+    }
     
     // Resetar o status de verificação
     if (isWhatsApp !== null) {
@@ -266,6 +385,112 @@ export default function NovaChatEvoPage() {
             </div>
           ) : (
             <div className="grid gap-6 max-w-xl mx-auto">
+              {/* Seleção de Lead */}
+              <div className="space-y-2">
+                <Label htmlFor="lead">Selecionar Lead</Label>
+                <Popover open={leadSearchOpen} onOpenChange={setLeadSearchOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={leadSearchOpen}
+                      className="w-full justify-between"
+                      disabled={loadingData}
+                    >
+                      {selectedLeadId
+                        ? leads.find((lead) => lead.id === selectedLeadId)?.name
+                        : loadingData ? "Carregando leads..." : "Escolha um lead ou digite um número manualmente"}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-full p-0">
+                    <Command>
+                      <CommandInput placeholder="Buscar lead..." />
+                      <CommandEmpty>Nenhum lead encontrado.</CommandEmpty>
+                      <CommandGroup>
+                        {leads.map((lead) => (
+                          <CommandItem
+                            key={lead.id}
+                            value={lead.name}
+                            onSelect={() => {
+                              handleLeadSelect(lead.id)
+                              setLeadSearchOpen(false)
+                            }}
+                          >
+                            <Check
+                              className={`mr-2 h-4 w-4 ${
+                                selectedLeadId === lead.id ? "opacity-100" : "opacity-0"
+                              }`}
+                            />
+                            {lead.name}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                {selectedLeadId && (
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      Lead selecionado: {leads.find(l => l.id === selectedLeadId)?.name}
+                    </p>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => {
+                        setSelectedLeadId('')
+                        setPhone('')
+                        setIsWhatsApp(null)
+                      }}
+                    >
+                      Limpar
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Seleção de Template */}
+              <div className="space-y-2">
+                <Label htmlFor="template">Template de Mensagem</Label>
+                <Select value={selectedTemplateId} onValueChange={handleTemplateSelect}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={loadingData ? "Carregando templates..." : "Escolha um template ou digite uma mensagem personalizada"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.length > 0 ? templates.map((template) => (
+                      <SelectItem key={template.id} value={template.id}>
+                        <div className="flex items-center space-x-2">
+                          <FileText className="h-4 w-4" />
+                          <span>{template.name}</span>
+                          <span className="text-muted-foreground">• {template.category}</span>
+                        </div>
+                      </SelectItem>
+                    )) : (
+                      <div className="p-2 text-sm text-muted-foreground">
+                        Nenhum template encontrado
+                      </div>
+                    )}
+                  </SelectContent>
+                </Select>
+                {selectedTemplateId && (
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      Template selecionado: {templates.find(t => t.id === selectedTemplateId)?.name}
+                    </p>
+                    <Button 
+                      variant="ghost" 
+                      size="sm"
+                      onClick={() => {
+                        setSelectedTemplateId('')
+                        setMessage('')
+                      }}
+                    >
+                      Limpar
+                    </Button>
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="phone">Número de telefone</Label>
                 <div className="flex gap-2">

@@ -126,8 +126,9 @@ export default function LeadsPage() {
   }
 
   const filteredLeads = leads.filter(lead =>
-    lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    lead.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    lead.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    lead.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    lead.phone?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (lead.company_name && lead.company_name.toLowerCase().includes(searchTerm.toLowerCase()))
   )
 
