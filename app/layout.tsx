@@ -7,7 +7,7 @@ import { Toaster } from 'sonner'
 import { SidebarProvider } from '@/components/ui/sidebar'
 
 export const metadata: Metadata = {
-  title: 'Meu CRM',
+  title: 'Gaia CRM',
   description: 'Sistema de gerenciamento de relacionamento com clientes',
   generator: 'v0.dev',
 }
