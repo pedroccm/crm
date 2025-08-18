@@ -37,7 +37,10 @@ import { useTeam } from "@/lib/team-context"
 import { 
   CustomFieldDefinition, 
   CustomFieldType, 
-  listCustomFields 
+  listCustomFields,
+  Label as LabelType,
+  getLeadLabels,
+  updateLeadLabels
 } from "@/lib/supabase"
 import { 
   Checkbox 
@@ -48,6 +51,7 @@ import {
   CardHeader, 
   CardTitle 
 } from "@/components/ui/card"
+import { LabelSelector } from "@/components/labels/LabelSelector"
 
 interface Company {
   id: string
@@ -87,6 +91,8 @@ export default function LeadFormPage({ params }: PageProps) {
   const { currentTeam } = useTeam()
   const [customFields, setCustomFields] = useState<CustomFieldDefinition[]>([])
   const [loadingCustomFields, setLoadingCustomFields] = useState(false)
+  const [selectedLabels, setSelectedLabels] = useState<LabelType[]>([])
+  const [labelsLoading, setLabelsLoading] = useState(false)
 
   const {
     register,
@@ -110,6 +116,9 @@ export default function LeadFormPage({ params }: PageProps) {
     }
     if (currentTeam?.id) {
       loadCustomFields()
+    }
+    if (isEditing && currentTeam?.id) {
+      loadLeadLabels()
     }
   }, [isEditing, currentTeam])
 
@@ -205,6 +214,20 @@ export default function LeadFormPage({ params }: PageProps) {
     }
   }
 
+  async function loadLeadLabels() {
+    if (!params.action || !currentTeam?.id) return
+    
+    try {
+      setLabelsLoading(true)
+      const labels = await getLeadLabels(params.action)
+      setSelectedLabels(labels)
+    } catch (error) {
+      console.error('Erro ao carregar labels do lead:', error)
+    } finally {
+      setLabelsLoading(false)
+    }
+  }
+
   async function onSubmit(data: LeadFormData) {
     try {
       setLoading(true)
@@ -247,6 +270,11 @@ export default function LeadFormPage({ params }: PageProps) {
           }
         });
         
+        // Atualizar labels se foram alteradas
+        if (isEditing) {
+          await updateLeadLabels(params.action, selectedLabels.map(l => l.id!))
+        }
+        
         toast.success("Lead atualizado com sucesso!")
       } else {
         // Inserir o novo lead
@@ -259,8 +287,10 @@ export default function LeadFormPage({ params }: PageProps) {
         
         // Registrar a atividade de criação no log se temos o ID do novo lead
         if (newLead && newLead.length > 0) {
+          const leadId = newLead[0].id
+          
           await logLeadActivity({
-            lead_id: newLead[0].id,
+            lead_id: leadId,
             action_type: LeadLogActionType.CREATED,
             description: `Lead "${data.name}" criado`,
             details: { 
@@ -269,6 +299,11 @@ export default function LeadFormPage({ params }: PageProps) {
               team_id: currentTeam.id // Usar currentTeam.id diretamente
             }
           });
+          
+          // Adicionar labels se foram selecionadas
+          if (selectedLabels.length > 0) {
+            await updateLeadLabels(leadId, selectedLabels.map(l => l.id!))
+          }
         }
         
         toast.success("Lead cadastrado com sucesso!")
@@ -622,6 +657,24 @@ export default function LeadFormPage({ params }: PageProps) {
                 {errors.status && (
                   <p className="text-sm text-red-500">{errors.status.message}</p>
                 )}
+              </div>
+
+              {/* Editor de Labels */}
+              <div className="md:col-span-2">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Labels</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <LabelSelector
+                      selectedLabels={selectedLabels}
+                      onLabelsChange={setSelectedLabels}
+                      placeholder="Adicionar labels ao lead..."
+                      allowCreate={true}
+                      maxLabels={10}
+                    />
+                  </CardContent>
+                </Card>
               </div>
 
               {/* Campos personalizados */}

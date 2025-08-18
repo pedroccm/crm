@@ -961,4 +961,57 @@ RECURSOS INCLUÍDOS:
 - Políticas de segurança detalhadas
 - Funções auxiliares
 - Comentários de documentação
-*/ 
+*/
+
+-- =====================================================
+-- TABELA DE TEMPLATES DE MENSAGENS
+-- =====================================================
+
+-- Criar tabela para templates de mensagens
+CREATE TABLE IF NOT EXISTS public.message_templates (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  team_id UUID NOT NULL REFERENCES public.teams(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  content TEXT NOT NULL,
+  variables JSONB DEFAULT '[]'::jsonb,
+  category VARCHAR(100) DEFAULT 'general',
+  is_active BOOLEAN DEFAULT true,
+  created_by UUID REFERENCES public.profiles(id),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+-- Índices para melhor performance
+CREATE INDEX IF NOT EXISTS idx_message_templates_team_id ON public.message_templates(team_id);
+CREATE INDEX IF NOT EXISTS idx_message_templates_category ON public.message_templates(category);
+CREATE INDEX IF NOT EXISTS idx_message_templates_active ON public.message_templates(is_active);
+
+-- RLS policies para message_templates
+ALTER TABLE public.message_templates ENABLE ROW LEVEL SECURITY;
+
+-- Políticas para message_templates
+CREATE POLICY "Membros podem ver templates do time" ON public.message_templates
+FOR SELECT USING (public.is_team_member(team_id) OR public.is_super_admin());
+
+CREATE POLICY "Admins podem inserir templates no time" ON public.message_templates
+FOR INSERT WITH CHECK (public.is_team_admin(team_id) OR public.is_super_admin());
+
+CREATE POLICY "Admins podem atualizar templates do time" ON public.message_templates
+FOR UPDATE USING (public.is_team_admin(team_id) OR public.is_super_admin());
+
+CREATE POLICY "Admins podem excluir templates do time" ON public.message_templates
+FOR DELETE USING (public.is_team_admin(team_id) OR public.is_super_admin());
+
+-- Trigger para updated_at
+CREATE OR REPLACE FUNCTION public.update_message_templates_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER trigger_update_message_templates_updated_at
+  BEFORE UPDATE ON public.message_templates
+  FOR EACH ROW
+  EXECUTE FUNCTION public.update_message_templates_updated_at(); 

@@ -159,10 +159,22 @@ export default function TemplatesPage() {
 
   // Campos básicos suportados pelo sistema
   const basicSupportedFields = [
-    'name', 'nome',
-    'email', 
-    'phone', 'telefone',
-    'company', 'empresa'
+    // Campos de lead
+    'lead.name', 'lead.nome', 'name', 'nome',
+    'lead.email', 'email',
+    'lead.phone', 'lead.telefone', 'phone', 'telefone',
+    'lead.status', 'status',
+    'lead.url', 'lead.link',
+    
+    // Campos de studio
+    'studio.slug', 'studio.url',
+    
+    // Campos de company
+    'company.name', 'company.nome', 'empresa.name', 'empresa.nome',
+    'company.email', 'empresa.email',
+    'company.phone', 'company.telefone', 'empresa.phone', 'empresa.telefone',
+    'company.address', 'company.endereco', 'empresa.address', 'empresa.endereco',
+    'company.website', 'company.site', 'empresa.website', 'empresa.site'
   ]
 
   // Estados para campos personalizados
@@ -180,7 +192,27 @@ export default function TemplatesPage() {
     if (!currentTeam?.id) return
     
     try {
-      // Buscar campos personalizados de leads
+      // Método 1: Buscar campos das definições (mais confiável)
+      const { data: fieldDefinitions, error: definitionsError } = await supabase
+        .from('custom_field_definitions')
+        .select('entity_type, field_name')
+        .eq('team_id', currentTeam.id)
+        .eq('is_visible', true)
+      
+      const leadFieldsFromDefs = new Set<string>()
+      const companyFieldsFromDefs = new Set<string>()
+      
+      if (!definitionsError && fieldDefinitions) {
+        fieldDefinitions.forEach(def => {
+          if (def.entity_type === 'lead') {
+            leadFieldsFromDefs.add(def.field_name)
+          } else if (def.entity_type === 'company') {
+            companyFieldsFromDefs.add(def.field_name)
+          }
+        })
+      }
+      
+      // Método 2: Buscar campos dos registros existentes (fallback)
       const { data: leadFields, error: leadError } = await supabase
         .from('leads')
         .select('custom_fields')
@@ -188,9 +220,6 @@ export default function TemplatesPage() {
         .not('custom_fields', 'is', null)
         .limit(100)
       
-      if (leadError) throw leadError
-      
-      // Buscar campos personalizados de empresas
       const { data: companyFields, error: companyError } = await supabase
         .from('companies')
         .select('custom_fields')
@@ -198,26 +227,35 @@ export default function TemplatesPage() {
         .not('custom_fields', 'is', null)
         .limit(100)
       
-      if (companyError) throw companyError
-      
-      // Extrair todos os campos personalizados únicos
+      // Extrair campos dos registros existentes
       const allLeadFields = new Set<string>()
       const allCompanyFields = new Set<string>()
       
-      leadFields?.forEach(lead => {
-        if (lead.custom_fields && typeof lead.custom_fields === 'object') {
-          Object.keys(lead.custom_fields).forEach(field => allLeadFields.add(field))
-        }
-      })
+      if (!leadError && leadFields) {
+        leadFields.forEach(lead => {
+          if (lead.custom_fields && typeof lead.custom_fields === 'object') {
+            Object.keys(lead.custom_fields).forEach(field => allLeadFields.add(field))
+          }
+        })
+      }
       
-      companyFields?.forEach(company => {
-        if (company.custom_fields && typeof company.custom_fields === 'object') {
-          Object.keys(company.custom_fields).forEach(field => allCompanyFields.add(field))
-        }
-      })
+      if (!companyError && companyFields) {
+        companyFields.forEach(company => {
+          if (company.custom_fields && typeof company.custom_fields === 'object') {
+            Object.keys(company.custom_fields).forEach(field => allCompanyFields.add(field))
+          }
+        })
+      }
       
-      setCustomLeadFields(Array.from(allLeadFields))
-      setCustomCompanyFields(Array.from(allCompanyFields))
+      // Combinar campos das definições com campos dos registros
+      const finalLeadFields = new Set([...leadFieldsFromDefs, ...allLeadFields])
+      const finalCompanyFields = new Set([...companyFieldsFromDefs, ...allCompanyFields])
+      
+      console.log('Campos de leads encontrados:', Array.from(finalLeadFields))
+      console.log('Campos de empresas encontrados:', Array.from(finalCompanyFields))
+      
+      setCustomLeadFields(Array.from(finalLeadFields))
+      setCustomCompanyFields(Array.from(finalCompanyFields))
       
     } catch (error) {
       console.error('Erro ao carregar campos personalizados:', error)
@@ -237,8 +275,12 @@ export default function TemplatesPage() {
     // Combinar todos os campos suportados
     const allSupportedFields = [
       ...basicSupportedFields,
-      ...customLeadFields,
-      ...customCompanyFields
+      // Campos personalizados de leads com prefixo
+      ...customLeadFields.map(field => `lead.${field}`),
+      ...customLeadFields, // Manter compatibilidade sem prefixo
+      // Campos personalizados de empresas com prefixo  
+      ...customCompanyFields.map(field => `company.${field}`),
+      ...customCompanyFields.map(field => `empresa.${field}`)
     ]
     
     const invalidVariables = variables.filter(variable => 
@@ -271,8 +313,12 @@ export default function TemplatesPage() {
     if (!validation.isValid) {
       const allSupportedFields = [
         ...basicSupportedFields,
-        ...customLeadFields,
-        ...customCompanyFields
+        // Campos personalizados de leads com prefixo
+        ...customLeadFields.map(field => `lead.${field}`),
+        ...customLeadFields, // Manter compatibilidade sem prefixo
+        // Campos personalizados de empresas com prefixo  
+        ...customCompanyFields.map(field => `company.${field}`),
+        ...customCompanyFields.map(field => `empresa.${field}`)
       ]
       toast.error(`Variáveis não suportadas: ${validation.invalidVariables.join(', ')}. Use apenas: ${allSupportedFields.join(', ')}`)
       return
@@ -553,21 +599,59 @@ export default function TemplatesPage() {
                   Campos suportados:
                 </p>
                 
-                {/* Campos básicos */}
+                {/* Campos básicos de Lead */}
                 <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">Campos básicos:</p>
+                  <p className="text-xs font-medium text-muted-foreground">Campos básicos do Lead:</p>
                   <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
                     <div>
-                      <code className="bg-muted px-1 rounded">{'{{name}}'}</code> ou <code className="bg-muted px-1 rounded">{'{{nome}}'}</code> - Nome do lead
+                      <code className="bg-blue-100 text-blue-800 px-1 rounded">{'{{lead.name}}'}</code> ou <code className="bg-blue-100 text-blue-800 px-1 rounded">{'{{name}}'}</code> - Nome do lead
                     </div>
                     <div>
-                      <code className="bg-muted px-1 rounded">{'{{email}}'}</code> - Email do lead
+                      <code className="bg-blue-100 text-blue-800 px-1 rounded">{'{{lead.email}}'}</code> ou <code className="bg-blue-100 text-blue-800 px-1 rounded">{'{{email}}'}</code> - Email do lead
                     </div>
                     <div>
-                      <code className="bg-muted px-1 rounded">{'{{phone}}'}</code> ou <code className="bg-muted px-1 rounded">{'{{telefone}}'}</code> - Telefone
+                      <code className="bg-blue-100 text-blue-800 px-1 rounded">{'{{lead.phone}}'}</code> ou <code className="bg-blue-100 text-blue-800 px-1 rounded">{'{{phone}}'}</code> - Telefone do lead
                     </div>
                     <div>
-                      <code className="bg-muted px-1 rounded">{'{{company}}'}</code> ou <code className="bg-muted px-1 rounded">{'{{empresa}}'}</code> - Empresa
+                      <code className="bg-blue-100 text-blue-800 px-1 rounded">{'{{lead.status}}'}</code> - Status do lead
+                    </div>
+                    <div>
+                      <code className="bg-blue-100 text-blue-800 px-1 rounded">{'{{lead.url}}'}</code> - Link do lead no CRM
+                    </div>
+                  </div>
+                </div>
+
+                {/* Campos básicos de Studio */}
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground">Campos básicos do Studio:</p>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                    <div>
+                      <code className="bg-purple-100 text-purple-800 px-1 rounded">{'{{studio.slug}}'}</code> - Slug do studio para URL
+                    </div>
+                    <div>
+                      <code className="bg-purple-100 text-purple-800 px-1 rounded">{'{{studio.url}}'}</code> - URL completa do studio
+                    </div>
+                  </div>
+                </div>
+
+                {/* Campos básicos de Company */}
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground">Campos básicos da Empresa:</p>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                    <div>
+                      <code className="bg-green-100 text-green-800 px-1 rounded">{'{{company.name}}'}</code> - Nome da empresa
+                    </div>
+                    <div>
+                      <code className="bg-green-100 text-green-800 px-1 rounded">{'{{company.email}}'}</code> - Email da empresa
+                    </div>
+                    <div>
+                      <code className="bg-green-100 text-green-800 px-1 rounded">{'{{company.phone}}'}</code> - Telefone da empresa
+                    </div>
+                    <div>
+                      <code className="bg-green-100 text-green-800 px-1 rounded">{'{{company.address}}'}</code> - Endereço da empresa
+                    </div>
+                    <div>
+                      <code className="bg-green-100 text-green-800 px-1 rounded">{'{{company.website}}'}</code> - Website da empresa
                     </div>
                   </div>
                 </div>
@@ -579,7 +663,7 @@ export default function TemplatesPage() {
                     <div className="flex flex-wrap gap-1">
                       {customLeadFields.map(field => (
                         <code key={field} className="bg-blue-100 text-blue-800 px-1 rounded text-xs">
-                          {`{{${field}}}`}
+                          {`{{lead.${field}}}`}
                         </code>
                       ))}
                     </div>
@@ -593,7 +677,7 @@ export default function TemplatesPage() {
                     <div className="flex flex-wrap gap-1">
                       {customCompanyFields.map(field => (
                         <code key={field} className="bg-green-100 text-green-800 px-1 rounded text-xs">
-                          {`{{${field}}}`}
+                          {`{{company.${field}}}`}
                         </code>
                       ))}
                     </div>

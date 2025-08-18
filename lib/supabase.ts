@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 // Verificar se estamos em um ambiente de build
 const isBuilding = process.env.NODE_ENV === 'production' && !process.env.VERCEL && !process.env.NETLIFY;
@@ -16,6 +17,18 @@ export const supabase = createClient(
     }
   }
 );
+
+// Cliente com service role para operações administrativas
+export const supabaseAdmin = supabaseServiceKey ? createClient(
+  supabaseUrl,
+  supabaseServiceKey,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
+) : null;
 
 /**
  * Verifica a conexão básica com o Supabase
@@ -215,7 +228,10 @@ export async function logLeadActivity(logEntry: LeadLogEntry) {
       }
     }
     
-    const { data, error } = await supabase
+    // Usar cliente admin se disponível, senão usar cliente normal
+    const client = supabaseAdmin || supabase;
+    
+    const { data, error } = await client
       .from('lead_activity_logs')
       .insert({
         lead_id: logEntry.lead_id,
@@ -1514,6 +1530,245 @@ export async function reorderCustomFields(teamId: string, entityType: 'lead' | '
     console.log(`Campos personalizados para ${entityType} reordenados com sucesso`);
   } catch (error) {
     console.error(`Erro ao reordenar campos personalizados para ${entityType}:`, error);
+    throw error;
+  }
+}
+
+// ==========================================
+// SISTEMA DE LABELS
+// ==========================================
+
+// Interface para labels
+export interface Label {
+  id?: string;
+  team_id: string;
+  name: string;
+  color: string; // Hex color (#RRGGBB)
+  description?: string;
+  is_active: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// Interface para relacionamento lead-label
+export interface LeadLabel {
+  id?: string;
+  lead_id: string;
+  label_id: string;
+  assigned_by?: string;
+  assigned_at?: string;
+  label?: Label; // Para joins
+}
+
+// Interface para lead com labels
+export interface LeadWithLabels {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  status: string;
+  labels?: Label[];
+}
+
+// Cores padrão para labels
+export const DEFAULT_LABEL_COLORS = [
+  '#ef4444', // red
+  '#f97316', // orange  
+  '#eab308', // yellow
+  '#22c55e', // green
+  '#06b6d4', // cyan
+  '#3b82f6', // blue
+  '#8b5cf6', // violet
+  '#ec4899', // pink
+  '#f59e0b', // amber
+  '#84cc16', // lime
+];
+
+/**
+ * Busca todas as labels de um time
+ */
+export async function getLabels(teamId: string): Promise<Label[]> {
+  try {
+    const { data, error } = await supabase
+      .from('labels')
+      .select('*')
+      .eq('team_id', teamId)
+      .eq('is_active', true)
+      .order('name');
+
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error('Erro ao buscar labels:', error);
+    throw error;
+  }
+}
+
+/**
+ * Cria uma nova label
+ */
+export async function createLabel(label: Omit<Label, 'id' | 'created_at' | 'updated_at'>): Promise<Label> {
+  try {
+    const { data, error } = await supabase
+      .from('labels')
+      .insert([label])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error('Erro ao criar label:', error);
+    throw error;
+  }
+}
+
+/**
+ * Atualiza uma label
+ */
+export async function updateLabel(id: string, updates: Partial<Label>): Promise<Label> {
+  try {
+    const { data, error } = await supabase
+      .from('labels')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error('Erro ao atualizar label:', error);
+    throw error;
+  }
+}
+
+/**
+ * Desativa uma label (soft delete)
+ */
+export async function deactivateLabel(id: string): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('labels')
+      .update({ is_active: false })
+      .eq('id', id);
+
+    if (error) throw error;
+  } catch (error) {
+    console.error('Erro ao desativar label:', error);
+    throw error;
+  }
+}
+
+/**
+ * Busca labels de um lead específico
+ */
+export async function getLeadLabels(leadId: string): Promise<Label[]> {
+  try {
+    const { data, error } = await supabase
+      .from('lead_labels')
+      .select(`
+        label_id,
+        labels!inner (
+          id,
+          name,
+          color,
+          description,
+          is_active
+        )
+      `)
+      .eq('lead_id', leadId)
+      .eq('labels.is_active', true);
+
+    if (error) throw error;
+    return (data || []).map(item => item.labels as Label);
+  } catch (error) {
+    console.error('Erro ao buscar labels do lead:', error);
+    throw error;
+  }
+}
+
+/**
+ * Adiciona uma label a um lead
+ */
+export async function addLabelToLead(leadId: string, labelId: string, assignedBy?: string): Promise<LeadLabel> {
+  try {
+    const { data, error } = await supabase
+      .from('lead_labels')
+      .insert([{
+        lead_id: leadId,
+        label_id: labelId,
+        assigned_by: assignedBy
+      }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.error('Erro ao adicionar label ao lead:', error);
+    throw error;
+  }
+}
+
+/**
+ * Remove uma label de um lead
+ */
+export async function removeLabelFromLead(leadId: string, labelId: string): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('lead_labels')
+      .delete()
+      .eq('lead_id', leadId)
+      .eq('label_id', labelId);
+
+    if (error) throw error;
+  } catch (error) {
+    console.error('Erro ao remover label do lead:', error);
+    throw error;
+  }
+}
+
+/**
+ * Atualiza todas as labels de um lead (remove antigas e adiciona novas)
+ */
+export async function updateLeadLabels(leadId: string, labelIds: string[], assignedBy?: string): Promise<void> {
+  try {
+    // Usar cliente admin se disponível, senão usar cliente normal
+    const client = supabaseAdmin || supabase;
+    
+    // Obter o usuário atual para assigned_by se não foi fornecido
+    if (!assignedBy) {
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        assignedBy = sessionData.session?.user?.id || 'system';
+      } catch (error) {
+        assignedBy = 'system';
+      }
+    }
+    
+    // Remover todas as labels existentes
+    await client
+      .from('lead_labels')
+      .delete()
+      .eq('lead_id', leadId);
+
+    // Adicionar novas labels
+    if (labelIds.length > 0) {
+      const leadLabels = labelIds.map(labelId => ({
+        lead_id: leadId,
+        label_id: labelId,
+        assigned_by: assignedBy
+      }));
+
+      const { error } = await client
+        .from('lead_labels')
+        .insert(leadLabels);
+
+      if (error) throw error;
+    }
+  } catch (error) {
+    console.error('Erro ao atualizar labels do lead:', error);
     throw error;
   }
 } 

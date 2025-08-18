@@ -258,6 +258,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           url: "/configuracoes/campos/empresas",
         },
         {
+          title: "Labels",
+          url: "/configuracoes/labels",
+        },
+        {
           title: "Integrações",
           url: "/configuracoes/integracoes",
         },

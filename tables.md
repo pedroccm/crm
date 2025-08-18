@@ -747,9 +747,11 @@
     "data_type": "text",
     "is_nullable": "YES",
     "column_default": "'new'::text"
+    
   },
   {
-    "table_name": "leads",
+    "table_name": "le
+    s",
     "column_name": "team_id",
     "data_type": "uuid",
     "is_nullable": "YES",

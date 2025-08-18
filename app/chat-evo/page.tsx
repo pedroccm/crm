@@ -115,6 +115,74 @@ function ChatEvoPageContent() {
   const [currentLead, setCurrentLead] = useState<any>(null)
   const [loadingPipelines, setLoadingPipelines] = useState(false)
   const [updatingLead, setUpdatingLead] = useState(false)
+  const [processedLeadParams, setProcessedLeadParams] = useState(false)
+  
+  // Função para remover conversas duplicadas baseadas no telefone
+  async function removeDuplicateChats(chats: EvolutionAPIChat[]): Promise<EvolutionAPIChat[]> {
+    const phoneMap = new Map<string, EvolutionAPIChat[]>()
+    
+    // Agrupar conversas pelo telefone normalizado
+    chats.forEach(chat => {
+      const phone = chat.phone || chat.id.replace('@s.whatsapp.net', '').replace(/\D/g, '')
+      if (!phone) return
+      
+      // Normalizar telefone para comparação (apenas números)
+      const normalizedPhone = phone.replace(/\D/g, '')
+      
+      if (!phoneMap.has(normalizedPhone)) {
+        phoneMap.set(normalizedPhone, [])
+      }
+      phoneMap.get(normalizedPhone)!.push(chat)
+    })
+    
+    const uniqueChats: EvolutionAPIChat[] = []
+    
+    // Para cada grupo de conversas com o mesmo telefone
+    for (const [phone, duplicateChats] of phoneMap) {
+      if (duplicateChats.length === 1) {
+        uniqueChats.push(duplicateChats[0])
+        continue
+      }
+      
+      console.log(`Encontradas ${duplicateChats.length} conversas duplicadas para telefone ${phone}`)
+      
+      // Escolher a melhor conversa (priorizar com nome)
+      let bestChat = duplicateChats[0]
+      for (const chat of duplicateChats) {
+        // Priorizar conversa com nome real (não apenas telefone)
+        if (chat.name && chat.name !== phone && (!bestChat.name || bestChat.name === phone)) {
+          bestChat = chat
+        }
+        // Se ambas têm nome, manter a mais recente
+        else if (chat.name && bestChat.name && chat.name !== phone && bestChat.name !== phone) {
+          const chatTime = new Date(chat.updated_at || chat.created_at || 0).getTime()
+          const bestTime = new Date(bestChat.updated_at || bestChat.created_at || 0).getTime()
+          if (chatTime > bestTime) {
+            bestChat = chat
+          }
+        }
+      }
+      
+      // Mesclar mensagens das conversas duplicadas (apenas para exibição, não no banco)
+      // As mensagens reais continuam no banco, apenas consolidamos a exibição
+      console.log(`Conversa escolhida: ${bestChat.name} (${bestChat.id})`)
+      
+      // TODO: Seria ideal mesclar as mensagens aqui, mas por enquanto usar a melhor conversa
+      uniqueChats.push(bestChat)
+      
+      // Log das conversas que serão "ocultadas"
+      const hiddenChats = duplicateChats.filter(c => c.id !== bestChat.id)
+      hiddenChats.forEach(hidden => {
+        console.log(`Conversa oculta (mas mensagens preservadas): ${hidden.name} (${hidden.id})`)
+      })
+    }
+    
+    return uniqueChats.sort((a, b) => {
+      const aTime = new Date(a.updated_at || a.created_at || 0).getTime()
+      const bTime = new Date(b.updated_at || b.created_at || 0).getTime()
+      return bTime - aTime // Mais recente primeiro
+    })
+  }
   
   // Estados para templates de mensagens
   const [isTemplateSelectorOpen, setIsTemplateSelectorOpen] = useState(false)
@@ -143,6 +211,18 @@ function ChatEvoPageContent() {
       loadConversations()
     }
   }, [apiConfig])
+
+  // Processar parâmetros lead_id e lead_name da URL
+  useEffect(() => {
+    const leadIdParam = searchParams?.get('lead_id')
+    const leadNameParam = searchParams?.get('lead_name')
+    
+    if (leadIdParam && !processedLeadParams) {
+      console.log('Processando parâmetros do lead da URL:', { leadIdParam, leadNameParam })
+      loadLeadFromParams(leadIdParam, leadNameParam)
+      setProcessedLeadParams(true)
+    }
+  }, [searchParams, processedLeadParams, currentTeam])
 
   // Processar parâmetro phone da URL para seleção automática de conversa
   useEffect(() => {
@@ -219,24 +299,20 @@ function ChatEvoPageContent() {
 
   // Carregar mensagens quando um contato for selecionado
   useEffect(() => {
-    
     if (selectedContact && apiConfig) {
       loadMessages()
       
-      
-      // Configurar polling inteligente para verificar apenas novas mensagens a cada 3 segundos
+      // Configurar polling inteligente para verificar apenas novas mensagens a cada 5 segundos
       const intervalId = setInterval(() => {
-        if (selectedContact && apiConfig) {
-          checkForNewMessages() // função mais leve que só verifica novas mensagens
-        }
-      }, 3000)
+        checkForNewMessages() // função mais leve que só verifica novas mensagens
+      }, 5000)
       
       // Limpar interval quando componente for desmontado ou contato mudar
       return () => {
         clearInterval(intervalId)
       }
     }
-  }, [selectedContact, apiConfig])
+  }, [selectedContact?.phone, apiConfig?.instance_name])
 
   // Função para verificar se o usuário está no final da conversa
   const checkIfAtBottom = useCallback(() => {
@@ -443,6 +519,85 @@ function ChatEvoPageContent() {
     }
   }
 
+  // Função para carregar lead pelos parâmetros da URL
+  async function loadLeadFromParams(leadId: string, leadName: string | null) {
+    if (!currentTeam?.id) return
+    
+    try {
+      console.log('Carregando lead:', leadId)
+      const { data: leadData, error } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('id', leadId)
+        .eq('team_id', currentTeam.id)
+        .single()
+      
+      if (error) {
+        console.error('Erro ao carregar lead:', error)
+        toast.error('Lead não encontrado')
+        return
+      }
+      
+      console.log('Lead carregado:', leadData)
+      setCurrentLead(leadData)
+      
+      // Se tem telefone, selecionar o contato automaticamente
+      if (leadData.phone) {
+        const contact: Contact = {
+          phone: leadData.phone,
+          name: leadData.name,
+        }
+        setSelectedContact(contact)
+        
+        // Aguardar um pouco para garantir que as conversações sejam carregadas
+        setTimeout(() => {
+          loadConversations()
+        }, 500)
+        
+        // Procurar conversa existente no banco de dados com múltiplas variações
+        if (apiConfig) {
+          const phoneVariations = [
+            leadData.phone,
+            leadData.phone.replace(/\D/g, ''), // Apenas números
+            `55${leadData.phone.replace(/\D/g, '')}`, // Com código do país
+            leadData.phone.replace(/\D/g, '').slice(-10), // Últimos 10 dígitos
+            leadData.phone.replace(/\D/g, '').slice(-11), // Últimos 11 dígitos
+          ].filter((phone, index, arr) => arr.indexOf(phone) === index) // Remove duplicatas
+          
+          console.log('Buscando conversa do lead para variações:', phoneVariations)
+          
+          let existingChat = null
+          for (const phoneVar of phoneVariations) {
+            existingChat = await findChatByPhone(apiConfig.team_id, phoneVar)
+            if (existingChat) {
+              console.log('Conversa do lead encontrada com telefone:', phoneVar)
+              break
+            }
+          }
+          
+          if (existingChat) {
+            // Se já existe, apenas atualizar o nome se necessário
+            if (!existingChat.name || existingChat.name === leadData.phone) {
+              const updatedChat: EvolutionAPIDBChat = {
+                ...existingChat,
+                name: leadData.name,
+                updated_at: new Date().toISOString()
+              }
+              await saveChat(updatedChat)
+            }
+            console.log('Conversa existente encontrada e atualizada:', existingChat)
+          } else {
+            console.log('Nenhuma conversa existente - será criada quando enviar primeira mensagem')
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error('Erro ao carregar lead:', error)
+      toast.error('Erro ao carregar dados do lead')
+    }
+  }
+
   // Função para buscar lead pelo telefone
   async function findLeadByPhone() {
     if (!selectedContact?.phone || !currentTeam?.id) return null
@@ -466,8 +621,12 @@ function ChatEvoPageContent() {
 
   // Função para abrir o seletor de pipeline
   async function openPipelineSelector() {
-    const lead = await findLeadByPhone()
-    setCurrentLead(lead)
+    // Usar currentLead se já estiver carregado, senão buscar pelo telefone
+    let lead = currentLead
+    if (!lead) {
+      lead = await findLeadByPhone()
+      setCurrentLead(lead)
+    }
     
     if (!lead) {
       // Em vez de mostrar erro, redirecionar para cadastro de lead com telefone preenchido
@@ -622,24 +781,66 @@ function ChatEvoPageContent() {
     // Se há um contato selecionado, buscar dados do lead
     if (selectedContact) {
       try {
-        // Buscar lead pelo telefone
-        const lead = await findLeadByPhone()
+        // Usar currentLead se disponível, senão buscar pelo telefone
+        const lead = currentLead || await findLeadByPhone()
         
         if (lead) {
-          // Substituir variáveis básicas do lead
-          processedContent = processedContent.replace(/\{\{name\}\}/g, lead.name || '')
-          processedContent = processedContent.replace(/\{\{nome\}\}/g, lead.name || '')
-          processedContent = processedContent.replace(/\{\{email\}\}/g, lead.email || '')
-          processedContent = processedContent.replace(/\{\{phone\}\}/g, lead.phone || '')
-          processedContent = processedContent.replace(/\{\{telefone\}\}/g, lead.phone || '')
-          processedContent = processedContent.replace(/\{\{empresa\}\}/g, lead.company_name || '')
-          processedContent = processedContent.replace(/\{\{company\}\}/g, lead.company_name || '')
+          // Substituir variáveis básicas do lead (compatibilidade) - usar "-" se vazio
+          processedContent = processedContent.replace(/\{\{name\}\}/g, lead.name || '-')
+          processedContent = processedContent.replace(/\{\{nome\}\}/g, lead.name || '-')
+          processedContent = processedContent.replace(/\{\{email\}\}/g, lead.email || '-')
+          processedContent = processedContent.replace(/\{\{phone\}\}/g, lead.phone || '-')
+          processedContent = processedContent.replace(/\{\{telefone\}\}/g, lead.phone || '-')
+          processedContent = processedContent.replace(/\{\{empresa\}\}/g, lead.company_name || '-')
+          processedContent = processedContent.replace(/\{\{company\}\}/g, lead.company_name || '-')
           
-          // Campos personalizados do lead
+          // Substituir variáveis com prefixo lead. - usar "-" se vazio
+          processedContent = processedContent.replace(/\{\{lead\.name\}\}/g, lead.name || '-')
+          processedContent = processedContent.replace(/\{\{lead\.nome\}\}/g, lead.name || '-')
+          processedContent = processedContent.replace(/\{\{lead\.email\}\}/g, lead.email || '-')
+          processedContent = processedContent.replace(/\{\{lead\.phone\}\}/g, lead.phone || '-')
+          processedContent = processedContent.replace(/\{\{lead\.telefone\}\}/g, lead.phone || '-')
+          processedContent = processedContent.replace(/\{\{lead\.status\}\}/g, lead.status || '-')
+          
+          // Substituir variáveis de custom_fields - usar "-" se vazio
+          processedContent = processedContent.replace(/\{\{lead\.instagram\}\}/g, lead.custom_fields?.instagram || '-')
+          processedContent = processedContent.replace(/\{\{lead\.site\}\}/g, lead.custom_fields?.site || '-')
+          processedContent = processedContent.replace(/\{\{lead\.website\}\}/g, lead.custom_fields?.website || '-')
+          processedContent = processedContent.replace(/\{\{lead\.cidade\}\}/g, lead.custom_fields?.cidade || lead.custom_fields?.city || '-')
+          processedContent = processedContent.replace(/\{\{lead\.city\}\}/g, lead.custom_fields?.city || lead.custom_fields?.cidade || '-')
+          
+          // Gerar link do lead no CRM
+          const leadUrl = `${window.location.origin}/leads/${lead.id}`
+          processedContent = processedContent.replace(/\{\{lead\.url\}\}/g, leadUrl)
+          processedContent = processedContent.replace(/\{\{lead\.link\}\}/g, leadUrl)
+          
+          // Gerar slug do studio baseado no nome do lead
+          const generateSlug = (text: string) => {
+            return text
+              .toLowerCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '') // Remove acentos
+              .replace(/[^a-z0-9\s-]/g, '') // Remove caracteres especiais
+              .replace(/\s+/g, '-') // Substitui espaços por hífens
+              .replace(/-+/g, '-') // Remove hífens duplicados
+              .replace(/^-|-$/g, '') // Remove hífens das bordas
+          }
+          
+          const studioSlug = lead.name ? generateSlug(lead.name) : '-'
+          const studioUrl = studioSlug !== '-' ? `http://localhost:3002/studios/${studioSlug}` : '-'
+          processedContent = processedContent.replace(/\{\{studio\.slug\}\}/g, studioSlug)
+          processedContent = processedContent.replace(/\{\{studio\.url\}\}/g, studioUrl)
+          
+          // Campos personalizados do lead (compatibilidade) - usar "-" se vazio
           if (lead.custom_fields) {
             Object.entries(lead.custom_fields).forEach(([key, value]) => {
+              const displayValue = value ? String(value) : '-'
               const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'gi') // Case insensitive
-              processedContent = processedContent.replace(regex, String(value || ''))
+              processedContent = processedContent.replace(regex, displayValue)
+              
+              // Com prefixo lead.
+              const leadRegex = new RegExp(`\\{\\{lead\\.${key}\\}\\}`, 'gi')
+              processedContent = processedContent.replace(leadRegex, displayValue)
             })
           }
           
@@ -653,11 +854,42 @@ function ChatEvoPageContent() {
                 .single()
               
               if (!companyError && company) {
-                // Campos personalizados da empresa
+                // Substituir campos básicos da empresa - usar "-" se vazio
+                processedContent = processedContent.replace(/\{\{company\.name\}\}/g, company.name || '-')
+                processedContent = processedContent.replace(/\{\{company\.nome\}\}/g, company.name || '-')
+                processedContent = processedContent.replace(/\{\{empresa\.name\}\}/g, company.name || '-')
+                processedContent = processedContent.replace(/\{\{empresa\.nome\}\}/g, company.name || '-')
+                processedContent = processedContent.replace(/\{\{company\.email\}\}/g, company.email || '-')
+                processedContent = processedContent.replace(/\{\{empresa\.email\}\}/g, company.email || '-')
+                processedContent = processedContent.replace(/\{\{company\.phone\}\}/g, company.phone || '-')
+                processedContent = processedContent.replace(/\{\{company\.telefone\}\}/g, company.phone || '-')
+                processedContent = processedContent.replace(/\{\{empresa\.phone\}\}/g, company.phone || '-')
+                processedContent = processedContent.replace(/\{\{empresa\.telefone\}\}/g, company.phone || '-')
+                processedContent = processedContent.replace(/\{\{company\.website\}\}/g, company.website || '-')
+                processedContent = processedContent.replace(/\{\{company\.site\}\}/g, company.website || '-')
+                processedContent = processedContent.replace(/\{\{empresa\.website\}\}/g, company.website || '-')
+                processedContent = processedContent.replace(/\{\{empresa\.site\}\}/g, company.website || '-')
+                processedContent = processedContent.replace(/\{\{company\.address\}\}/g, company.address || '-')
+                processedContent = processedContent.replace(/\{\{company\.endereco\}\}/g, company.address || '-')
+                processedContent = processedContent.replace(/\{\{empresa\.address\}\}/g, company.address || '-')
+                processedContent = processedContent.replace(/\{\{empresa\.endereco\}\}/g, company.address || '-')
+                
+                // Campos personalizados da empresa - usar "-" se vazio
                 if (company.custom_fields) {
                   Object.entries(company.custom_fields).forEach(([key, value]) => {
+                    const displayValue = value ? String(value) : '-'
+                    
+                    // Manter compatibilidade sem prefixo
                     const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'gi') // Case insensitive
-                    processedContent = processedContent.replace(regex, String(value || ''))
+                    processedContent = processedContent.replace(regex, displayValue)
+                    
+                    // Com prefixo company.
+                    const companyRegex = new RegExp(`\\{\\{company\\.${key}\\}\\}`, 'gi')
+                    processedContent = processedContent.replace(companyRegex, displayValue)
+                    
+                    // Com prefixo empresa.
+                    const empresaRegex = new RegExp(`\\{\\{empresa\\.${key}\\}\\}`, 'gi')
+                    processedContent = processedContent.replace(empresaRegex, displayValue)
                   })
                 }
               }
@@ -671,7 +903,7 @@ function ChatEvoPageContent() {
       }
     }
     
-    // Aplicar template processado
+    // Aplicar template processado (preservar quebras de linha)
     setNewMessage(processedContent)
     setIsTemplateSelectorOpen(false)
   }
@@ -829,7 +1061,10 @@ function ChatEvoPageContent() {
           // Converter para o formato esperado pela interface
           const formattedChats = dbChats.map(convertDBChatToAPIChat)
           
-          setConversations(formattedChats)
+          // Remover duplicatas baseadas no telefone
+          const uniqueChats = await removeDuplicateChats(formattedChats)
+          
+          setConversations(uniqueChats)
           setLoadingConversations(false)
           return
         } else {
@@ -862,8 +1097,30 @@ function ChatEvoPageContent() {
       setLoadingMessages(true)
       
       // Primeiro, carregar mensagens do banco de dados para exibição imediata
+      // Buscar mensagens de todas as variações do telefone para pegar mensagens de conversas duplicadas
       try {
-        const dbMessages = await findMessagesByPhone(apiConfig.team_id, selectedContact.phone)
+        const phoneVariations = [
+          selectedContact.phone,
+          selectedContact.phone.replace(/\D/g, ''), // Apenas números
+          `55${selectedContact.phone.replace(/\D/g, '')}`, // Com código do país
+          selectedContact.phone.replace(/\D/g, '').slice(-10), // Últimos 10 dígitos
+          selectedContact.phone.replace(/\D/g, '').slice(-11), // Últimos 11 dígitos
+        ].filter((phone, index, arr) => arr.indexOf(phone) === index) // Remove duplicatas
+        
+        let allDbMessages: any[] = []
+        for (const phoneVar of phoneVariations) {
+          const messages = await findMessagesByPhone(apiConfig.team_id, phoneVar)
+          allDbMessages = [...allDbMessages, ...messages]
+        }
+        
+        // Remover mensagens duplicadas baseadas no message_id
+        const uniqueMessages = allDbMessages.filter((msg, index, arr) => 
+          arr.findIndex(m => m.message_id === msg.message_id) === index
+        )
+        
+        console.log(`Carregadas ${uniqueMessages.length} mensagens únicas de ${phoneVariations.length} variações do telefone`)
+        
+        const dbMessages = uniqueMessages
         
         if (dbMessages.length > 0) {
           
@@ -1042,8 +1299,7 @@ function ChatEvoPageContent() {
   }
 
   // Função inteligente que só verifica novas mensagens sem recarregar tudo
-  async function checkForNewMessages() {
-    
+  const checkForNewMessages = useCallback(async () => {
     if (!selectedContact || !apiConfig) {
       return
     }
@@ -1094,9 +1350,16 @@ function ChatEvoPageContent() {
             // Se não há mensagens carregadas, definir todas as mensagens de uma vez
             setMessages(newMessages)
           } else {
-            // Adicionar apenas as novas mensagens ao estado existente
+            // Adicionar apenas as novas mensagens ao estado existente (evitar duplicatas)
             setMessages(prevMessages => {
-              const updated = [...prevMessages, ...newMessages]
+              const existingIds = new Set(prevMessages.map(msg => msg.key.id))
+              const uniqueNewMessages = newMessages.filter(msg => !existingIds.has(msg.key.id))
+              
+              if (uniqueNewMessages.length === 0) {
+                return prevMessages // Não atualizar se não há mensagens novas únicas
+              }
+              
+              const updated = [...prevMessages, ...uniqueNewMessages]
               return updated
             })
           }
@@ -1180,7 +1443,7 @@ function ChatEvoPageContent() {
       console.error("Stack trace:", (error as Error)?.stack)
       // Não mostrar toast para não incomodar o usuário
     }
-  }
+  }, [selectedContact?.phone, apiConfig?.instance_name, messages.length])
 
   const handleSendMessage = async () => {
     if (!newMessage.trim() || !selectedContact || !apiConfig) return
@@ -1219,8 +1482,25 @@ function ChatEvoPageContent() {
       
         // Salvar a mensagem e atualizar a conversa no banco de dados
         
-        // Verificar se a conversa já existe
-        const existingChat = await findChatByPhone(apiConfig.team_id, selectedContact.phone)
+        // Verificar se a conversa já existe (buscar por múltiplas variações do telefone)
+        const phoneVariations = [
+          selectedContact.phone,
+          selectedContact.phone.replace(/\D/g, ''), // Apenas números
+          `55${selectedContact.phone.replace(/\D/g, '')}`, // Com código do país
+          selectedContact.phone.replace(/\D/g, '').slice(-10), // Últimos 10 dígitos
+          selectedContact.phone.replace(/\D/g, '').slice(-11), // Últimos 11 dígitos
+        ].filter((phone, index, arr) => arr.indexOf(phone) === index) // Remove duplicatas
+        
+        console.log('Buscando conversa existente para variações:', phoneVariations)
+        
+        let existingChat = null
+        for (const phoneVar of phoneVariations) {
+          existingChat = await findChatByPhone(apiConfig.team_id, phoneVar)
+          if (existingChat) {
+            console.log('Conversa encontrada com telefone:', phoneVar)
+            break
+          }
+        }
         
         let chatId: string
         
@@ -1235,11 +1515,12 @@ function ChatEvoPageContent() {
           const savedChat = await saveChat(updatedChat)
           chatId = savedChat.id!
         } else {
-          // Criar nova conversa
+          // Criar nova conversa usando nome do currentLead se disponível
+          const chatName = currentLead?.name || selectedContact.name || selectedContact.phone
           const newChat: EvolutionAPIDBChat = {
             team_id: apiConfig.team_id,
             phone: selectedContact.phone,
-            name: selectedContact.name,
+            name: chatName,
             last_message: messageText,
             whatsapp_jid: `${selectedContact.phone}@s.whatsapp.net`,
             profile_picture_url: selectedContact.avatar,
@@ -1787,8 +2068,12 @@ function ChatEvoPageContent() {
                           )}
                         </div>
                         <div>
-                          <h2 className="font-medium">{selectedContact.name}</h2>
-                          <p className="text-xs text-muted-foreground">{selectedContact.phone}</p>
+                          <h2 className="font-medium">
+                            {currentLead ? currentLead.name : selectedContact.name}
+                          </h2>
+                          <p className="text-xs text-muted-foreground">
+                            {currentLead ? currentLead.phone : selectedContact.phone}
+                          </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
@@ -1831,7 +2116,7 @@ function ChatEvoPageContent() {
                           .sort((a, b) => a.messageTimestamp - b.messageTimestamp)
                           .map((message, index) => {
                             // Garantir que a chave seja única mesmo se houver mensagens com o mesmo ID
-                            const uniqueKey = `${message.key.id}-${index}`;
+                            const uniqueKey = `${message.key.id}-${message.messageTimestamp}-${index}`;
                             
                             return (
                               <div
@@ -1849,7 +2134,7 @@ function ChatEvoPageContent() {
                                 >
                                   {/* Conteúdo da mensagem baseado no tipo */}
                                   {message.message?.conversation || message.message?.extendedTextMessage?.text ? (
-                                    <p className="text-sm break-words break-all">
+                                    <p className="text-sm break-words break-all whitespace-pre-wrap">
                                       {message.message?.conversation || message.message?.extendedTextMessage?.text}
                                     </p>
                                   ) : message.message?.imageMessage ? (
@@ -1860,7 +2145,7 @@ function ChatEvoPageContent() {
                                         className="rounded max-h-[200px] max-w-full"
                                       />
                                       {message.message.imageMessage.caption && (
-                                        <p className="text-sm break-words break-all">{message.message.imageMessage.caption}</p>
+                                        <p className="text-sm break-words break-all whitespace-pre-wrap">{message.message.imageMessage.caption}</p>
                                       )}
                                     </div>
                                   ) : message.message?.videoMessage ? (
@@ -1871,7 +2156,7 @@ function ChatEvoPageContent() {
                                         className="rounded max-h-[200px] max-w-full"
                                       />
                                       {message.message.videoMessage.caption && (
-                                        <p className="text-sm break-words break-all">{message.message.videoMessage.caption}</p>
+                                        <p className="text-sm break-words break-all whitespace-pre-wrap">{message.message.videoMessage.caption}</p>
                                       )}
                                     </div>
                                   ) : message.message?.audioMessage ? (
@@ -1942,13 +2227,18 @@ function ChatEvoPageContent() {
                           <Button variant="ghost" size="icon" onClick={() => {}}>
                             <Paperclip className="h-5 w-5 text-muted-foreground" />
                           </Button>
-                          <Input
+                          <textarea
                             placeholder="Digite uma mensagem..."
                             value={newMessage}
                             onChange={(e) => setNewMessage(e.target.value)}
                             onKeyDown={handleKeyPress}
                             disabled={!selectedContact || sendingMessage || isRecording}
-                            className="flex-1"
+                            rows={newMessage.split('\n').length}
+                            className="flex-1 min-h-[40px] max-h-[120px] resize-none border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 rounded-md"
+                            style={{ 
+                              minHeight: '40px',
+                              height: Math.min(120, Math.max(40, newMessage.split('\n').length * 20 + 20)) + 'px'
+                            }}
                           />
                           {newMessage.trim() ? (
                             <Button 

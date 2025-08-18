@@ -51,6 +51,20 @@ import {
 import { CreateTeamDialog } from "@/components/create-team-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { UserPlus, Trash2, Users, Building2, Settings } from "lucide-react";
+import { AppSidebar } from "@/components/app-sidebar";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
 
 export default function TeamSettingsPage() {
   const router = useRouter();
@@ -246,60 +260,95 @@ export default function TeamSettingsPage() {
   
   if (needsTeam || teams.length === 0) {
     return (
-      <div className="container mx-auto py-10">
-        <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-          <Building2 className="h-16 w-16 mb-4 text-muted-foreground" />
-          <h1 className="text-2xl font-bold mb-2">Bem-vindo ao Gaia CRM</h1>
-          <p className="text-muted-foreground mb-8 max-w-md">
-            Para começar a usar o sistema, você precisa criar ou participar de um time.
-            Um time é um espaço isolado onde você pode gerenciar leads, empresas e pipelines.
-          </p>
-          
-          <div className="flex flex-col gap-4 w-full max-w-md">
-            <Card>
-              <CardHeader>
-                <CardTitle>Criar um novo time</CardTitle>
-                <CardDescription>
-                  Crie seu próprio time para gerenciar seus leads e empresas
-                </CardDescription>
-              </CardHeader>
-              <CardFooter>
-                <Button 
-                  className="w-full" 
-                  onClick={() => setIsCreateTeamOpen(true)}
-                >
-                  <Building2 className="mr-2 h-4 w-4" />
-                  Criar time
-                </Button>
-              </CardFooter>
-            </Card>
+      <SidebarProvider>
+        <AppSidebar />
+        <SidebarInset>
+          <div className="container mx-auto py-10">
+            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+              <Building2 className="h-16 w-16 mb-4 text-muted-foreground" />
+              <h1 className="text-2xl font-bold mb-2">Bem-vindo ao Gaia CRM</h1>
+              <p className="text-muted-foreground mb-8 max-w-md">
+                Para começar a usar o sistema, você precisa criar ou participar de um time.
+                Um time é um espaço isolado onde você pode gerenciar leads, empresas e pipelines.
+              </p>
+              
+              <div className="flex flex-col gap-4 w-full max-w-md">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Criar um novo time</CardTitle>
+                    <CardDescription>
+                      Crie seu próprio time para gerenciar seus leads e empresas
+                    </CardDescription>
+                  </CardHeader>
+                  <CardFooter>
+                    <Button 
+                      className="w-full" 
+                      onClick={() => setIsCreateTeamOpen(true)}
+                    >
+                      <Building2 className="mr-2 h-4 w-4" />
+                      Criar time
+                    </Button>
+                  </CardFooter>
+                </Card>
+                
+                <p className="text-sm text-muted-foreground">
+                  Se você foi convidado para um time, verifique o link de convite em seu email.
+                </p>
+              </div>
+            </div>
             
-            <p className="text-sm text-muted-foreground">
-              Se você foi convidado para um time, verifique o link de convite em seu email.
-            </p>
+            <CreateTeamDialog 
+              open={isCreateTeamOpen} 
+              onOpenChange={setIsCreateTeamOpen} 
+            />
           </div>
-        </div>
-        
-        <CreateTeamDialog 
-          open={isCreateTeamOpen} 
-          onOpenChange={setIsCreateTeamOpen} 
-        />
-      </div>
+        </SidebarInset>
+      </SidebarProvider>
     );
   }
   
   if (isLoading || !currentTeam) {
     return (
-      <div className="container mx-auto py-10">
-        <div className="flex justify-center items-center min-h-[60vh]">
-          <p>Carregando configurações do time...</p>
-        </div>
-      </div>
+      <SidebarProvider>
+        <AppSidebar />
+        <SidebarInset>
+          <div className="container mx-auto py-10">
+            <div className="flex justify-center items-center min-h-[60vh]">
+              <p>Carregando configurações do time...</p>
+            </div>
+          </div>
+        </SidebarInset>
+      </SidebarProvider>
     );
   }
   
   return (
-    <div className="container mx-auto py-10">
+    <SidebarProvider>
+      <AppSidebar />
+      <SidebarInset>
+        <header className="flex h-16 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-[[data-collapsible=icon]]/sidebar-wrapper:h-12">
+          <div className="flex items-center gap-2 px-4">
+            <SidebarTrigger className="-ml-1" />
+            <Separator orientation="vertical" className="mr-2 h-4" />
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbLink href="/dashboard">Dashboard</BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbLink href="/configuracoes">Configurações</BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>Time</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+        </header>
+
+        <div className="flex flex-1 flex-col gap-4 p-4">
       <div className="flex justify-between items-center mb-8">
         <div>
           <h1 className="text-3xl font-bold">Configurações do Time</h1>
@@ -632,6 +681,8 @@ export default function TeamSettingsPage() {
           </Card>
         </TabsContent>
       </Tabs>
-    </div>
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 } 
